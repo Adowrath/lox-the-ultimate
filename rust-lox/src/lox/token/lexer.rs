@@ -51,10 +51,13 @@ pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>
     let mut tokens: Vec<Token> = vec![];
     loop {
         match next_token(&mut source, &mut line, &mut col) {
-            Ok(Token {
+            Ok(token@Token {
                 token_type: TokenType::EndOfInput,
                 ..
-            }) => break,
+            }) => {
+                tokens.push(token);
+                break
+            },
 
             Ok(token) => {
                 tokens.push(token);

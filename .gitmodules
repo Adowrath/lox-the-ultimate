@@ -1,0 +1,3 @@
+[submodule "ci-book"]
+	path = ci-book
+	url = https://github.com/munificent/craftinginterpreters

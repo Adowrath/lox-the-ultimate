@@ -55,7 +55,8 @@ pub enum Keyword {
 
 impl Keyword {
     /// Extract the raw representation as it occurs in the source code.
-    fn to_raw(self) -> &'static str {
+    #[must_use]
+    pub fn to_raw(self) -> &'static str {
         match self {
             Keyword::Nil => "nil",
             Keyword::False => "false",
@@ -171,7 +172,8 @@ impl TokenType {
     /// Extract the raw representation as it occurs in the source code.
     /// Most tokens only have a singular possible representation, so they
     /// do not have to store anything by themselves.
-    fn to_raw(&self) -> &str {
+    #[must_use]
+    pub fn to_raw(&self) -> &str {
         match *self {
             TokenType::LeftParen => "(",
             TokenType::RightParen => ")",

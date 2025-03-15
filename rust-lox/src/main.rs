@@ -191,6 +191,7 @@ pub mod lox;
 use clap::{Parser, Subcommand};
 
 use lox::errors::EngineError;
+use lox::std::LoxStdDisplay;
 use lox::token::lexer;
 
 use std::fs;
@@ -200,20 +201,24 @@ use std::process::{ExitCode, Termination};
 /// Load a file and run it through the interpreter.
 /// TODO: Currently, only lexes. Still needs to Parse and Validate.
 /// TODO: Configure VM/X86 backend?
-fn run_file(file: String) -> Result<(), EngineError> {
+fn run_file(file: String, std_conformant: bool) -> Result<(), EngineError> {
     let source = fs::read_to_string(file)?;
     let tokens = lexer::tokenize(source)
         .map_err(EngineError::LexingErrors)?;
 
     for token in tokens {
-        println!("{token:?}");
+        if std_conformant {
+            println!("{}", token.std_display());
+        } else {
+            println!("{token:?}");
+        }
     }
     Ok(())
 }
 
 /// Run the REPL Prompt.
 /// TODO: Add command support (mainly :quit)
-fn run_prompt() -> Result<(), IOError> {
+fn run_prompt(_std_conformant: bool) -> Result<(), IOError> {
     use std::io::{stdin, stdout};
 
     let mut line = String::new();
@@ -274,6 +279,12 @@ where
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct LoxArgs {
+    /// Whether to use standards-conformant implementations of certain features.
+    ///
+    /// Most notably, this affects how tokens are displayed currently.
+    #[arg(id = "std", long, env = "RUST_LOX_STD", global = true)]
+    std_conformant: bool,
+
     /// Subcommands, either this or [`source_file`] needs to be specified.
     #[command(subcommand)]
     command: Option<LoxCommands>,
@@ -302,15 +313,16 @@ enum LoxCommands {
 
 fn main() -> EngineResult {
     let LoxArgs {
+        std_conformant,
         command,
         source_file
     } = LoxArgs::parse();
 
     match (command, source_file) {
         (None, Some(source_file))
-        | (Some(LoxCommands::Tokenize { source_file }), None) => run_file(source_file).into(),
+        | (Some(LoxCommands::Tokenize { source_file }), None) => run_file(source_file, std_conformant).into(),
 
-        (Some(LoxCommands::Repl), None) => run_prompt().into(),
+        (Some(LoxCommands::Repl), None) => run_prompt(std_conformant).into(),
 
         (Some(_), Some(_))
         | (None, None) => unreachable!("clap verifies this cannot happen."),
