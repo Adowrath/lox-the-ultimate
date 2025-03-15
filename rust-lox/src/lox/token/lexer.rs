@@ -11,7 +11,10 @@
 //!     class
 //! "#;
 //! ```
-#![allow(clippy::min_ident_chars, reason = "short names do not decrease readability here.")]
+#![allow(
+    clippy::min_ident_chars,
+    reason = "short names do not decrease readability here."
+)]
 
 use core::iter::Peekable;
 use core::str::{Chars, FromStr};
@@ -27,7 +30,7 @@ pub enum LexingError {
     /// A string was started but not terminated until the end of input/file
     UnterminatedString(Span),
     /// A comment was started but not terminated until the end of input/file
-    UnterminatedComment(Span)
+    UnterminatedComment(Span),
 }
 
 /// Tokenizes the given source code of Lox into either a [Vec] of [`Tokens`](Token),
@@ -42,7 +45,10 @@ pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>
     let mut tokens: Vec<Token> = vec![];
     loop {
         match next_token(&mut source, &mut line, &mut col) {
-            Ok(Token { token_type: TokenType::EndOfInput, .. }) => break,
+            Ok(Token {
+                token_type: TokenType::EndOfInput,
+                ..
+            }) => break,
 
             Ok(token) => {
                 tokens.push(token);
@@ -65,9 +71,16 @@ pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>
 ///
 /// In case of an error, the characters stay consumed, so that lexing can continue
 /// past the error.
-#[expect(clippy::too_many_lines, reason = "Splitting this function into multiple would massively hurt its simplicity.")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Splitting this function into multiple would massively hurt its simplicity."
+)]
 #[inline]
-fn next_token(source: &mut Peekable<Chars<'_>>, line: &mut usize, col: &mut usize) -> Result<Token, LexingError> {
+fn next_token(
+    source: &mut Peekable<Chars<'_>>,
+    line: &mut usize,
+    col: &mut usize,
+) -> Result<Token, LexingError> {
     loop {
         /// Generates a location value from the current line and column values.
         macro_rules! loc(() => {
@@ -136,7 +149,10 @@ fn next_token(source: &mut Peekable<Chars<'_>>, line: &mut usize, col: &mut usiz
             })
         }});
 
-        #[expect(clippy::redundant_else, reason = "False positive in clippy::pedantic - if doesn't always exit the loop.")]
+        #[expect(
+            clippy::redundant_else,
+            reason = "False positive in clippy::pedantic - if doesn't always exit the loop."
+        )]
         if let Some(char) = next_char!() {
             match char {
                 // Grouping
@@ -187,7 +203,10 @@ fn next_token(source: &mut Peekable<Chars<'_>>, line: &mut usize, col: &mut usiz
                     } else {
                         // Correctness: Some(x) where x != '"' cannot happen,
                         // as the while loop consumed such a character.
-                        break Err(LexingError::UnterminatedString(Span::from(start_loc, loc!())))
+                        break Err(LexingError::UnterminatedString(Span::from(
+                            start_loc,
+                            loc!(),
+                        )));
                     }
                 }
                 c if is_digit(c) => {
@@ -203,9 +222,10 @@ fn next_token(source: &mut Peekable<Chars<'_>>, line: &mut usize, col: &mut usiz
                     }
                     let num = num.into_iter().collect::<String>();
                     break emit_token!(TokenType::Literal(LoxLiteral::Number {
-                        value: f64::from_str(&num).expect("if this fails, the parsing above failed already"),
+                        value: f64::from_str(&num)
+                            .expect("if this fails, the parsing above failed already"),
                         raw: num,
-                    }))
+                    }));
                 }
 
                 // Identifiers and Keywords
@@ -217,15 +237,12 @@ fn next_token(source: &mut Peekable<Chars<'_>>, line: &mut usize, col: &mut usiz
                     let ident = ident.into_iter().collect::<String>();
                     match KEYWORDS.get(ident.as_str()) {
                         Some(kw) => break emit_token!(TokenType::Keyword(*kw)),
-                        None => break emit_token!(TokenType::Identifier(
-                            Identifier(ident)
-                        )),
+                        None => break emit_token!(TokenType::Identifier(Identifier(ident))),
                     }
                 }
 
-
                 // Whitespace
-                ' ' | '\t' | '\r' | '\n' => {}, // just skip
+                ' ' | '\t' | '\r' | '\n' => {} // just skip
 
                 // Comments
                 '/' if next_char_is!('/') => {
@@ -236,35 +253,41 @@ fn next_token(source: &mut Peekable<Chars<'_>>, line: &mut usize, col: &mut usiz
                 }
                 '/' if next_char_is!('*') => {
                     let mut nesting = 1usize;
-                    #[expect(clippy::arithmetic_side_effects, reason = "If nesting actually manages to overflow, you got bigger problems. (also, it's unsigned, so overflow is perfectly safe.)")]
+                    #[expect(
+                        clippy::arithmetic_side_effects,
+                        reason = "If nesting actually manages to overflow, you got bigger problems. (also, it's unsigned, so overflow is perfectly safe.)"
+                    )]
                     if let Err(err) = loop {
                         match next_char!() {
-                            None => break Err(
-                                LexingError::UnterminatedComment(Span::from(start_loc, loc!()))
-                            ),
+                            None => {
+                                break Err(LexingError::UnterminatedComment(Span::from(
+                                    start_loc,
+                                    loc!(),
+                                )))
+                            }
                             Some('/') if next_char_is!('*') => nesting += 1,
                             Some('*') if next_char_is!('/') => nesting -= 1,
-                            _ => {},
+                            _ => {}
                         }
 
                         if nesting == 0 {
-                            break Ok(())
+                            break Ok(());
                         }
                     } {
-                        break Err(err)
+                        break Err(err);
                     };
-                },
+                }
 
                 // ERROR
-                _ => break Err(
-                    LexingError::UnknownSymbol(
+                _ => {
+                    break Err(LexingError::UnknownSymbol(
                         vec![char],
-                        Span::from(start_loc, loc!())
-                    )
-                )
+                        Span::from(start_loc, loc!()),
+                    ))
+                }
             }
         } else {
-            break emit_token!(TokenType::EndOfInput)
+            break emit_token!(TokenType::EndOfInput);
         }
     }
 }
@@ -295,18 +318,26 @@ mod test {
     use crate::lox::types::LoxLiteral::*;
 
     fn tokenize_no_spans(source: impl AsRef<str>) -> Vec<TokenType> {
-        super::tokenize(source).expect("Tokenizing failed")
-            .into_iter().map(|token| token.token_type)
+        super::tokenize(source)
+            .expect("Tokenizing failed")
+            .into_iter()
+            .map(|token| token.token_type)
             .collect()
     }
 
     #[test]
     fn simple_tokenizations() {
-        assert_eq!(tokenize_no_spans("var foo = 20"), vec![
-            Keyword(Var),
-            TokenType::Identifier(Identifier("foo".to_owned())),
-            Assign,
-            Literal(Number { value: 20.0, raw: "20".to_owned() })
-        ]);
+        assert_eq!(
+            tokenize_no_spans("var foo = 20"),
+            vec![
+                Keyword(Var),
+                TokenType::Identifier(Identifier("foo".to_owned())),
+                Assign,
+                Literal(Number {
+                    value: 20.0,
+                    raw: "20".to_owned()
+                })
+            ]
+        );
     }
 }

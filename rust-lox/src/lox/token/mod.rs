@@ -6,5 +6,5 @@
 //!
 //! This module mirrors, but doesn't directly follow, the [Scanning](https://craftinginterpreters.com/scanning.html)
 //! chapter of the "Crafting Interpreters" book.
-pub mod tokens;
 pub mod lexer;
+pub mod tokens;

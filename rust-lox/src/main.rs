@@ -177,9 +177,7 @@
     clippy::verbose_file_reads,
     clippy::wildcard_enum_match_arm
 )]
-#![warn(
-    unused,
-)]
+#![warn(unused)]
 #![allow(
     edition_2024_expr_fragment_specifier,
     reason = "the macros expect the 2024 edition behaviour."
@@ -252,7 +250,9 @@ impl Termination for EngineResult {
 }
 
 impl<T, E> From<Result<T, E>> for EngineResult<T>
-    where EngineError: From<E> {
+where
+    EngineError: From<E>,
+{
     fn from(value: Result<T, E>) -> Self {
         match value {
             Ok(value) => EngineResult::Ok(value),
@@ -269,14 +269,13 @@ impl<T, E> From<Result<T, E>> for EngineResult<T>
 
 fn main() -> EngineResult {
     let mut args = args();
-    let prog_name = args.next().expect("First args element should be the program name.");
+    let prog_name = args
+        .next()
+        .expect("First args element should be the program name.");
 
     match args.next() {
         None => run_prompt().into(),
-        Some(_) if args.len() > 0 => {
-            EngineResult::Err(EngineError::UsageError(prog_name))
-        },
-        Some(file) => run_file(file).into()
+        Some(_) if args.len() > 0 => EngineResult::Err(EngineError::UsageError(prog_name)),
+        Some(file) => run_file(file).into(),
     }
 }
-

@@ -64,7 +64,7 @@ pub enum LoxLiteral {
         /// The raw value of the number as it appeared in source code.
         /// Only used for error reporting purposes.
         raw: String,
-    }
+    },
 }
 
 impl LoxLiteral {
@@ -72,8 +72,7 @@ impl LoxLiteral {
     /// in the source code.
     pub fn to_raw(&self) -> &str {
         match *self {
-            LoxLiteral::String { ref raw, .. }
-            | LoxLiteral::Number { ref raw, .. } => raw.as_str(),
+            LoxLiteral::String { ref raw, .. } | LoxLiteral::Number { ref raw, .. } => raw.as_str(),
         }
     }
 }

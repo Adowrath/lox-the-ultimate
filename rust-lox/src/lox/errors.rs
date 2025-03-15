@@ -30,17 +30,15 @@ impl EngineError {
     /// Turns the error into a String that can be printed to standard error.
     pub fn display_error(&self) -> String {
         match *self {
-            EngineError::UsageError(ref prog_name) =>
-                format!("Usage: {prog_name} [script]"),
-            EngineError::FileError(ref error) =>
-                format!("Error reading source file: {error}"),
-            EngineError::LexingErrors(ref errs) =>
-                format!("Errors when parsing: \n{}",
-                          errs.iter()
-                              .map(|err| format!("{err:?}"))
-                              .collect::<Vec<_>>()
-                              .join("\n")
-                )
+            EngineError::UsageError(ref prog_name) => format!("Usage: {prog_name} [script]"),
+            EngineError::FileError(ref error) => format!("Error reading source file: {error}"),
+            EngineError::LexingErrors(ref errs) => format!(
+                "Errors when parsing: \n{}",
+                errs.iter()
+                    .map(|err| format!("{err:?}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
         }
     }
 }
@@ -56,16 +54,14 @@ impl From<IOError> for EngineError {
 
 impl From<EngineError> for ExitCode {
     fn from(value: EngineError) -> Self {
-        ExitCode::from(
-            match value {
-                EngineError::UsageError(_) => 64, // EX_USAGE
-                // Technically, 66 only specifies missing or unreadable files
-                // any other errors during I/O for both the file, and the REPL command,
-                // should be presented as 74, EX_IOERR
-                EngineError::FileError(_) => 66, // EX_NOINPUT
-                EngineError::LexingErrors(_) => 65, // EX_DATAERR
-            }
-        )
+        ExitCode::from(match value {
+            EngineError::UsageError(_) => 64, // EX_USAGE
+            // Technically, 66 only specifies missing or unreadable files
+            // any other errors during I/O for both the file, and the REPL command,
+            // should be presented as 74, EX_IOERR
+            EngineError::FileError(_) => 66,    // EX_NOINPUT
+            EngineError::LexingErrors(_) => 65, // EX_DATAERR
+        })
     }
 }
 
@@ -80,7 +76,10 @@ pub trait UnterminatedError {
 
 impl UnterminatedError for EngineError {
     fn is_unterminated(&self) -> bool {
-        #[expect(clippy::indexing_slicing, reason = "access is checked by length before")]
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "access is checked by length before"
+        )]
         if let EngineError::LexingErrors(ref errs) = *self {
             errs.len() == 1 && errs[0].is_unterminated()
         } else {
@@ -94,8 +93,7 @@ impl UnterminatedError for lexer::LexingError {
         use lexer::LexingError;
         match *self {
             LexingError::UnknownSymbol(_, _) => false,
-            LexingError::UnterminatedString(_)
-            | LexingError::UnterminatedComment(_) => true,
+            LexingError::UnterminatedString(_) | LexingError::UnterminatedComment(_) => true,
         }
     }
 }
