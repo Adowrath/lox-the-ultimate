@@ -24,6 +24,7 @@ use crate::lox::types::{Identifier, Location, LoxLiteral, Span};
 
 /// Errors that can happen during lexing.
 #[derive(Debug)]
+#[expect(clippy::exhaustive_enums, reason = "lexing is a finished chapter")]
 pub enum LexingError {
     /// Unknown symbol in the source code
     UnknownSymbol(Vec<char>, Span),
@@ -36,6 +37,11 @@ pub enum LexingError {
 /// Tokenizes the given source code of Lox into either a [Vec] of [`Tokens`](Token),
 /// or returns all [`LexingErrors`](LexingError) if any did occur.
 /// Thus, you cannot proceed with the list of tokens if lexing had any errors.
+///
+/// # Errors
+///
+/// - Unknown Symbols in the Lox Source code.
+/// - Unterminated Strings or Block comments.
 pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>> {
     let mut source = source.as_ref().chars().peekable();
 

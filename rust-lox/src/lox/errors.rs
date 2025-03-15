@@ -8,7 +8,7 @@ use crate::lox::token::lexer;
 /// This enum will be extended bit by bit as new phases
 /// get added.
 ///
-/// To support the [std::process::Termination] trait such that, just like
+/// To support the [`std::process::Termination`] trait such that, just like
 /// the Crafting Interpreters book, we can use exit codes as specified by
 /// the [`<sysexits.h>`](https://man.freebsd.org/cgi/man.cgi?query=sysexits&apropos=0&sektion=0&manpath=FreeBSD+4.3-RELEASE&format=html)
 /// header, a `From<EngineError> for ExitCode` implementation is provided.
@@ -16,6 +16,7 @@ use crate::lox::token::lexer;
 /// This is done for parity, not for any actual useful reason - this header
 /// attempts to define a standard, but it hasn't actually caught on much from what I could tell.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum EngineError {
     /// An error in how the tool is called.
     UsageError(String),
@@ -28,6 +29,7 @@ pub enum EngineError {
 
 impl EngineError {
     /// Turns the error into a String that can be printed to standard error.
+    #[must_use]
     pub fn display_error(&self) -> String {
         match *self {
             EngineError::UsageError(ref prog_name) => format!("Usage: {prog_name} [script]"),

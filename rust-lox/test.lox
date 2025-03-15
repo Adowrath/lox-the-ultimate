@@ -7,7 +7,7 @@ class Test {
         super(a);
         this.b = b;
     }
-}@
+}
 
 var t = Test();
 print t;

@@ -8,6 +8,7 @@ use crate::lox::util::map;
 
 /// Keywords in the Lox language.
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[expect(clippy::exhaustive_enums, reason = "new keywords would necessarily be a breaking change")]
 pub enum Keyword {
     // Constants
     /// `"nil"`
@@ -104,6 +105,7 @@ pub static KEYWORDS: LazyLock<HashMap<&'static str, Keyword>> = LazyLock::new(||
 
 /// An enum covering all possible variations a token can take on.
 #[derive(Debug, PartialEq)]
+#[expect(clippy::exhaustive_enums, reason = "new token types would necessarily be a breaking change")]
 pub enum TokenType {
     // Grouping
     /// `"("`
@@ -200,6 +202,7 @@ impl TokenType {
 
 /// A thin wrapper that bundles the token type with a source span.
 #[derive(Debug, PartialEq)]
+#[expect(clippy::exhaustive_structs, reason = "fields are complete")]
 pub struct Token {
     /// Type of this token.
     pub token_type: TokenType,

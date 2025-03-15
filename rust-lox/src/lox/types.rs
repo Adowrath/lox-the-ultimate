@@ -5,6 +5,7 @@ use core::fmt::{Display, Formatter};
 
 /// A Location simply consists of a line and column position.
 #[derive(Copy, Clone, Debug, PartialEq)]
+#[expect(clippy::exhaustive_structs, reason = "Locations are always line+col")]
 pub struct Location {
     /// Line of the location, 0-indexed.
     pub line: usize,
@@ -20,7 +21,9 @@ impl Display for Location {
 
 /// Source Spans define locations of elements in the source code,
 /// given both their start and end positions as [`Locations`](Location).
+/// Both positions are to be treated as inclusive.
 #[derive(Debug, PartialEq)]
+#[non_exhaustive] // Filename might be added.
 pub struct Span {
     /// Start of the Span
     pub start: Location,
@@ -30,6 +33,7 @@ pub struct Span {
 
 impl Span {
     /// Construct a source span from given start and end positions
+    #[must_use]
     pub fn from(start: Location, end: Location) -> Self {
         Span { start, end }
     }
@@ -48,6 +52,10 @@ impl Display for Span {
 /// Literals inside the Lox Language, they carry with their value
 /// the raw source code that was used to declare them.
 #[derive(Debug, PartialEq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "adding a new variant MUST be handled and is a breaking change."
+)]
 pub enum LoxLiteral {
     /// A string, with no escape sequences supported currently.
     String {
@@ -70,6 +78,7 @@ pub enum LoxLiteral {
 impl LoxLiteral {
     /// Extract the raw representation as it occurred
     /// in the source code.
+    #[must_use]
     pub fn to_raw(&self) -> &str {
         match *self {
             LoxLiteral::String { ref raw, .. } | LoxLiteral::Number { ref raw, .. } => raw.as_str(),
@@ -79,4 +88,5 @@ impl LoxLiteral {
 
 /// Identifiers inside the Lox Language.
 #[derive(Debug, PartialEq)]
+#[expect(clippy::exhaustive_structs, reason = "Identifiers stay as Strings.")]
 pub struct Identifier(pub String);
