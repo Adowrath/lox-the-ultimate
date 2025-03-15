@@ -1,0 +1,8 @@
+[project.hask-lox]
+lang = "Haskell"
+
+[project.java-lox]
+lang = "Java"
+
+[project.rust-lox]
+lang = "Rust"
