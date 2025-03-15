@@ -57,20 +57,24 @@
 //! [^1]: <https://craftinginterpreters.com/>
 #![deny(
     warnings,
-
+)]
+#![deny(
     future_incompatible,
     keyword_idents,
     let_underscore,
     nonstandard_style,
     refining_impl_trait,
-
+)]
+#![deny(
     rust_2018_compatibility,
     rust_2021_compatibility,
     rust_2024_compatibility,
-
+)]
+#![deny(
     clippy::all,
     clippy::pedantic,
-
+)]
+#![deny(
     clippy::absolute_paths,
     clippy::alloc_instead_of_core,
     clippy::allow_attributes,
@@ -184,20 +188,22 @@
 )]
 pub mod lox;
 
-use std::env::args;
-use std::fs;
-use std::io::{Error as IOError, Write};
-use std::process::{ExitCode, Termination};
+use clap::{Parser, Subcommand};
 
 use lox::errors::EngineError;
 use lox::token::lexer;
+
+use std::fs;
+use std::io::{Error as IOError, Write};
+use std::process::{ExitCode, Termination};
 
 /// Load a file and run it through the interpreter.
 /// TODO: Currently, only lexes. Still needs to Parse and Validate.
 /// TODO: Configure VM/X86 backend?
 fn run_file(file: String) -> Result<(), EngineError> {
     let source = fs::read_to_string(file)?;
-    let tokens = lexer::tokenize(source).map_err(EngineError::LexingErrors)?;
+    let tokens = lexer::tokenize(source)
+        .map_err(EngineError::LexingErrors)?;
 
     for token in tokens {
         println!("{token:?}");
@@ -261,21 +267,49 @@ where
     }
 }
 
-// impl<T> From<EngineError> for EngineResult<T> {
-//     fn from(error: EngineError) -> Self {
-//         EngineResult::Err(error)
-//     }
-// }
+/// rust-lox is a work-in-progress implementation of the Lox Programming Language,
+/// planning to cover all parts from lexing through to both an interpreter, and
+/// the bytecode VM as described in the second part, with planned extensions for
+/// a further compilation target (JavaScript, LLVM, or both).
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct LoxArgs {
+    /// Subcommands, either this or [`source_file`] needs to be specified.
+    #[command(subcommand)]
+    command: Option<LoxCommands>,
+
+    /// Source File for the program
+    #[arg(required = true)]
+    source_file: Option<String>,
+}
+
+/// Available commands in Rust-Lox
+#[derive(Subcommand, Debug)]
+#[command(subcommand_negates_reqs = true)]
+enum LoxCommands {
+    /// run the lox repl.
+    ///
+    /// In the future, this may optionally load a source file first, making it available on the REPL.
+    Repl,
+    /// tokenize the given file and print its contents.
+    Tokenize {
+        source_file: String,
+    },
+}
 
 fn main() -> EngineResult {
-    let mut args = args();
-    let prog_name = args
-        .next()
-        .expect("First args element should be the program name.");
+    let LoxArgs {
+        command,
+        source_file
+    } = LoxArgs::parse();
 
-    match args.next() {
-        None => run_prompt().into(),
-        Some(_) if args.len() > 0 => EngineResult::Err(EngineError::UsageError(prog_name)),
-        Some(file) => run_file(file).into(),
+    match (command, source_file) {
+        (None, Some(source_file))
+        | (Some(LoxCommands::Tokenize { source_file }), None) => run_file(source_file).into(),
+
+        (Some(LoxCommands::Repl), None) => run_prompt().into(),
+
+        (Some(_), Some(_))
+        | (None, None) => unreachable!("clap verifies this cannot happen."),
     }
 }
