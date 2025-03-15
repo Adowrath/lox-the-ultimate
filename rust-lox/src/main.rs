@@ -285,7 +285,7 @@ struct LoxArgs {
     #[arg(id = "std", long, env = "RUST_LOX_STD", global = true)]
     std_conformant: bool,
 
-    /// Subcommands, either this or [`source_file`] needs to be specified.
+    /// Subcommands, either this or [`source_file`](LoxArgs::source_file) needs to be specified.
     #[command(subcommand)]
     command: Option<LoxCommands>,
 
