@@ -1,0 +1,13 @@
+class Test {
+    /*
+     * Constructor function
+     * /* supports nested block comments */
+     */
+    fun init(a, b) {
+        super(a);
+        this.b = b;
+    }
+}@
+
+var t = Test();
+print t;
