@@ -280,12 +280,13 @@ struct LoxArgs {
 
     /// Source File for the program
     #[arg(required = true)]
+    #[arg(value_name = "source file")]
     source_file: Option<String>,
 }
 
 /// Available commands in Rust-Lox
 #[derive(Subcommand, Debug)]
-#[command(subcommand_negates_reqs = true)]
+#[command(subcommand_negates_reqs = true, subcommand_value_name = "task")]
 enum LoxCommands {
     /// run the lox repl.
     ///
@@ -293,6 +294,8 @@ enum LoxCommands {
     Repl,
     /// tokenize the given file and print its contents.
     Tokenize {
+        /// the source file to tokenize
+        #[arg(value_name = "source file")]
         source_file: String,
     },
 }
