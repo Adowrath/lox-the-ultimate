@@ -4,6 +4,7 @@
 use core::fmt::{Display, Formatter};
 
 /// A Location simply consists of a line and column position.
+#[cfg(not(feature = "fancy-errors"))]
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[expect(clippy::exhaustive_structs, reason = "Locations are always line+col")]
 pub struct Location {
@@ -13,6 +14,7 @@ pub struct Location {
     pub col: usize,
 }
 
+#[cfg(not(feature = "fancy-errors"))]
 impl Display for Location {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}:{}", self.line, self.col)
@@ -22,6 +24,7 @@ impl Display for Location {
 /// Source Spans define locations of elements in the source code,
 /// given both their start and end positions as [`Locations`](Location).
 /// Both positions are to be treated as inclusive.
+#[cfg(not(feature = "fancy-errors"))]
 #[derive(Debug, PartialEq)]
 #[non_exhaustive] // Filename might be added.
 pub struct Span {
@@ -31,6 +34,7 @@ pub struct Span {
     pub end: Location,
 }
 
+#[cfg(not(feature = "fancy-errors"))]
 impl Span {
     /// Construct a source span from given start and end positions
     #[must_use]
@@ -39,6 +43,7 @@ impl Span {
     }
 }
 
+#[cfg(not(feature = "fancy-errors"))]
 impl Display for Span {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         if self.start == self.end {
@@ -48,6 +53,9 @@ impl Display for Span {
         }
     }
 }
+
+#[cfg(feature = "fancy-errors")]
+pub type Span = miette::SourceSpan;
 
 /// Literals inside the Lox Language, they carry with their value
 /// the raw source code that was used to declare them.

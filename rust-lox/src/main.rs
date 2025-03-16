@@ -42,7 +42,7 @@
 //!
 //! ## Aspirations
 //!
-//! I (the author) wishes to attempt a faithful implementation of the Lox language, in
+//! I (the author) wish to attempt a faithful implementation of the Lox language, in
 //! the following components:
 //!
 //! - The Interpreter, as described by the book.
@@ -207,7 +207,7 @@
 )]
 
 // Sanity check for Nightly features.
-#[cfg(all(feature = "nightly", not(nightly)))]
+#[cfg(all(feature = "nightly", not(nightly), not(doc)))]
 compile_error!("nightly feature cannot be used without a nightly toolchain (detected by rustversion)");
 
 // Modules and Imports
