@@ -32,7 +32,8 @@
 //!   support like the ability to cancel input via Ctrl-C is also not enabled currently.
 //! - Not as much an extension of Lox itself, this crate also offers the `"nightly"`
 //!   feature if a nightly toolchain is being used, and, if enabled, uses nightly,
-//!   experimental features in various places.
+//!   experimental features in various places, such as generators for the tokenization
+//!   phase instead of the normal strategy.
 //!
 //!   This is further special as this dual functionality is attempted to be implemented
 //!   as seamlessly as possible, fulfilling all the same restrictions on lints and documentation
@@ -199,6 +200,10 @@
 #![cfg_attr(nightly_toolchain,
     // Not used by us directly, but by #[macro_pub] instead.
     feature(decl_macro)
+)]
+#![cfg_attr(nightly,
+    // tokenizer
+    feature(gen_blocks),
 )]
 
 // Sanity check for Nightly features.
