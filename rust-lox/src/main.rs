@@ -30,6 +30,14 @@
 //!
 //!   This, however, does not allow for editing of any previous line, and additional
 //!   support like the ability to cancel input via Ctrl-C is also not enabled currently.
+//! - Not as much an extension of Lox itself, this crate also offers the `"nightly"`
+//!   feature if a nightly toolchain is being used, and, if enabled, uses nightly,
+//!   experimental features in various places.
+//!
+//!   This is further special as this dual functionality is attempted to be implemented
+//!   as seamlessly as possible, fulfilling all the same restrictions on lints and documentation
+//!   as the "stable" code follows, whilst also making sure to keep any code duplication
+//!   between the two variants to an absolute minimum.
 //!
 //! ## Aspirations
 //!
@@ -156,7 +164,6 @@
     clippy::semicolon_inside_block,
     clippy::semicolon_outside_block,
     clippy::separated_literal_suffix,
-    clippy::single_char_lifetime_names,
     clippy::std_instead_of_alloc,
     clippy::std_instead_of_core,
     clippy::str_to_string,
@@ -186,6 +193,19 @@
     edition_2024_expr_fragment_specifier,
     reason = "the macros expect the 2024 edition behaviour."
 )]
+
+// Nightly configuration
+#![cfg_attr(all(nightly, doc), allow(internal_features), feature(rustc_attrs))]
+#![cfg_attr(nightly_toolchain,
+    // Not used by us directly, but by #[macro_pub] instead.
+    feature(decl_macro)
+)]
+
+// Sanity check for Nightly features.
+#[cfg(all(feature = "nightly", not(nightly)))]
+compile_error!("nightly feature cannot be used without a nightly toolchain (detected by rustversion)");
+
+// Modules and Imports
 pub mod lox;
 
 use clap::{Parser, Subcommand};
@@ -311,6 +331,7 @@ enum LoxCommands {
     },
 }
 
+#[expect(clippy::unreachable, reason = "Unreachability is a guarantee by Clap's rules")]
 fn main() -> EngineResult {
     let LoxArgs {
         std_conformant,

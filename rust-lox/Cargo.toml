@@ -6,3 +6,9 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5.32", features = ["derive", "env", "wrap_help"] }
 macro_pub = "0.1.0"
+
+[features]
+nightly = []
+
+[build-dependencies]
+rustversion = "1.0.20"
