@@ -19,7 +19,7 @@
 use crate::lox::token::tokens::{Token, TokenType, KEYWORDS};
 use crate::lox::types::{Identifier, Location, LoxLiteral, Span};
 use core::iter::Peekable;
-use core::str::{Chars, FromStr};
+use core::str::FromStr;
 #[cfg(nightly)]
 use itertools::Itertools;
 
@@ -48,15 +48,14 @@ pub enum LexingError {
     reason = "nightly uses generators and itertools instead of manual pushing"
 ))]
 pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>> {
-    let mut source = source.as_ref().chars().peekable();
+    let source = source.as_ref();
+    let mut tokenize_input = TokenizeInput::new(source.chars());
 
-    let mut line = 0usize;
-    let mut col = 0usize;
     let mut errs: Vec<LexingError>;
     let mut tokens: Vec<Token>;
     #[cfg(nightly)]
     {
-        let token_stream = next_token(&mut source, &mut line, &mut col);
+        let token_stream = next_token(tokenize_input);
         (tokens, errs) = token_stream.partition_result();
     };
     #[cfg(not(nightly))]
@@ -64,7 +63,7 @@ pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>
         errs = vec![];
         tokens = vec![];
         loop {
-            match next_token(&mut source, &mut line, &mut col) {
+            match next_token(&mut tokenize_input) {
                 Ok(token @ Token {
                     token_type: TokenType::EndOfInput,
                     ..
@@ -90,6 +89,35 @@ pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>
     }
 }
 
+/// Input/State holder to the tokenizer, created from the source code.
+pub struct TokenizeInput<I: Iterator> {
+    source: Peekable<I>,
+
+    #[cfg(not(nightly))]
+    line: usize,
+    #[cfg(not(nightly))]
+    col: usize,
+}
+
+impl<I: Iterator<Item=char>> TokenizeInput<I> {
+    /// Create a new tokenizer input from the given source code.
+    ///
+    /// The only restriction is that it needs to be convertible
+    /// into an Iterator over characters.
+    pub fn new<II>(source: II) -> Self
+    where
+        II: IntoIterator<IntoIter=I>,
+    {
+        Self {
+            source: source.into_iter().peekable(),
+            #[cfg(not(nightly))]
+            line: 0,
+            #[cfg(not(nightly))]
+            col: 0,
+        }
+    }
+}
+
 /// Tokenizer Step Result, to support Generators on Nightly.
 #[cfg(nightly)]
 macro_rules! tokenize_result(() => {
@@ -101,15 +129,15 @@ macro_rules! tokenize_result(() => {
     Result<Token, LexingError>
 });
 
-/// Wrap the loop in a generator on the nightly feature set.
+/// Wrap in a generator to properly scope the captures.
 #[cfg(nightly)]
-macro_rules! run_loop(($body:expr) => {{
-    gen { loop { $body } }
+macro_rules! wrap_gen(($body:expr) => {{
+    gen { $body }
 }});
-/// Wrap the loop in a generator on the nightly feature set.
+/// No-op on Stable versions.
 #[cfg(not(nightly))]
-macro_rules! run_loop(($body:expr) => {{
-    loop { $body }
+macro_rules! wrap_gen(($body:expr) => {{
+    $body
 }});
 
 /// Lexes the next token, advancing the source iterator appropriately
@@ -122,114 +150,138 @@ macro_rules! run_loop(($body:expr) => {{
     reason = "Splitting this function into multiple would massively hurt its simplicity."
 )]
 #[inline]
-pub fn next_token(
-    source: &mut Peekable<Chars<'_>>,
-    line: &mut usize,
-    col: &mut usize,
+pub fn next_token<I: Iterator<Item=char> + Clone>(
+    // The nightly version should accept the input by move, not by mutable reference.
+    // It is expected that the generator fully drains the input.
+    #[cfg(nightly)]
+    tokenize_input: TokenizeInput<I>,
+    // On stable, we need a mutable reference to it so that we can pass it in over
+    // and over again for each next token.
+    #[cfg(not(nightly))]
+    tokenize_input: &mut TokenizeInput<I>,
 ) -> tokenize_result!() {
-    run_loop! {{
-        /// Generates a location value from the current line and column values.
-        macro_rules! loc(() => {
-            Location {
-                line: *line,
-                col: *col,
-            }
-        });
-        let start_loc = loc!();
-        /// Gets the next character, updating line and/or col values.
-        macro_rules! next_char(() => {{
-            match source.next() {
-                None => None,
-                Some(c) => {
-                    #[expect(clippy::arithmetic_side_effects, reason = "If these ever overflow, you got bigger problems (also usize overflows safely).")]
-                    if c == '\n' {
-                        *col = 0;
-                        *line += 1;
-                    } else {
-                        *col += 1;
-                    }
-                    Some(c)
-                }
-            }
-        }});
-        /// Gets the next character only if it matches the predicate.
-        /// Pass either `== $expr`, `!= $expr`, or a predicate closure.
-        /// First two return true/false, while the predicate version returns
-        /// the character directly.
-        macro_rules! next_char_is {
-            ($test:expr) => {{
-                match source.peek() {
-                    Some(c) if $test(*c) => next_char!(),
-                    _ => None,
-                }
-            }};
-            (== $test:expr) => {{
-                next_char_is!(|c| c == $test).is_some()
-            }};
-            (!= $test:expr) => {{
-                next_char_is!(|c| c != $test).is_some()
-            }}
-        }
-        /// Peeks if the next character matches the predicate.
-        macro_rules! peek_next {
-            ($test:expr) => {{
-                match source.peek() {
-                    Some(c) if $test(*c) => true,
-                    _ => false,
-                }
-            }};
-            (== $expected:expr) => {{
-                peek_next!(|c| c == $expected)
-            }};
-            (!= $expected:expr) => {{
-                peek_next!(|c| c != $expected)
-            }}
-        }
-        /// Peeks if the character one beyond the next matches the predicate.
-        macro_rules! peek_two_ahead {
-            ($test:expr) => {{
-                match source.clone().nth(1) {
-                    Some(c) if $test(c) => true,
-                    _ => false,
-                }
-            }};
-            (== $test:expr) => {{
-                peek_two_ahead!(|c| c == $test)
-            }};
-            (!= $test:expr) => {{
-                peek_two_ahead!(|c| c == $test)
-            }}
-        }
-        /// Emits an item, via yield on nightly.
-        #[cfg(nightly)]
-        macro_rules! emit(($value:expr) => {{
-            yield $value;
-        }});
-        /// Emits an item, via break on stable.
-        #[cfg(not(nightly))]
-        macro_rules! emit(($value:expr) => {{
-            break $value;
-        }});
-        /// Emits a token of the given type, with a span from
-        /// the start to the current position.
-        macro_rules! emit_token(($token_type:expr) => {{
-            emit!(Ok(Token {
-                token_type: $token_type,
-                span: Span::from(start_loc, loc!())
-            }))
-        }});
-        /// Emits an error item.
-        macro_rules! emit_error(($error_value:expr) => {{
-            emit!(Err($error_value))
-        }});
+    wrap_gen! {{
+        let TokenizeInput {
+            ref mut source,
+            #[cfg(not(nightly))]
+            ref mut line,
+            #[cfg(not(nightly))]
+            ref mut col,
+        } = *tokenize_input;
 
-        let char = match next_char!() {
-            Some(char) => char,
-            None => {
-                emit_token!(TokenType::EndOfInput);
-                #[cfg(nightly)] break
-            },
-        };
+        #[cfg(nightly)]
+        let (mut line, mut col) = (0usize, 0usize);
+
+        #[expect(unused_macro_rules, reason = "parity rules")]
+        loop {
+            /// No-op on Nightly
+            #[cfg(nightly)]
+            macro_rules! deref(($val:expr) => { $val });
+            /// No-op on Nightly
+            #[cfg(not(nightly))]
+            macro_rules! deref(($val:expr) => { *$val });
+            /// Generates a location value from the current line and column values.
+            macro_rules! loc(() => {
+                Location {
+                    line: deref!(line),
+                    col: deref!(col),
+                }
+            });
+            let start_loc = loc!();
+            /// Gets the next character, updating line and/or col values.
+            macro_rules! next_char(() => {{
+                match source.next() {
+                    None => None,
+                    Some(c) => {
+                        #[expect(clippy::arithmetic_side_effects, reason = "If these ever overflow, you got bigger problems (also usize overflows safely).")]
+                        if c == '\n' {
+                            deref!(col) = 0;
+                            deref!(line) += 1;
+                        } else {
+                            deref!(col) += 1;
+                        }
+                        Some(c)
+                    }
+                }
+            }});
+            /// Gets the next character only if it matches the predicate.
+            /// Pass either `== $expr`, `!= $expr`, or a predicate closure.
+            /// First two return true/false, while the predicate version returns
+            /// the character directly.
+            macro_rules! next_char_is {
+                ($test:expr) => {{
+                    match source.peek() {
+                        Some(c) if $test(*c) => next_char!(),
+                        _ => None,
+                    }
+                }};
+                (== $test:expr) => {{
+                    next_char_is!(|c| c == $test).is_some()
+                }};
+                (!= $test:expr) => {{
+                    next_char_is!(|c| c != $test).is_some()
+                }}
+            }
+            /// Peeks if the next character matches the predicate.
+            macro_rules! peek_next {
+                ($test:expr) => {{
+                    match source.peek() {
+                        Some(c) if $test(*c) => true,
+                        _ => false,
+                    }
+                }};
+                (== $expected:expr) => {{
+                    peek_next!(|c| c == $expected)
+                }};
+                (!= $expected:expr) => {{
+                    peek_next!(|c| c != $expected)
+                }}
+            }
+            /// Peeks if the character one beyond the next matches the predicate.
+            macro_rules! peek_two_ahead {
+                ($test:expr) => {{
+                    match source.clone().nth(1) {
+                        Some(c) if $test(c) => true,
+                        _ => false,
+                    }
+                }};
+                (== $test:expr) => {{
+                    peek_two_ahead!(|c| c == $test)
+                }};
+                (!= $test:expr) => {{
+                    peek_two_ahead!(|c| c == $test)
+                }}
+            }
+            /// Emits an item, via yield on nightly.
+            #[cfg(nightly)]
+            macro_rules! emit(($value:expr) => {{
+                yield $value;
+            }});
+            /// Emits an item, via break on stable.
+            #[cfg(not(nightly))]
+            macro_rules! emit(($value:expr) => {{
+                break $value;
+            }});
+            /// Emits a token of the given type, with a span from
+            /// the start to the current position.
+            macro_rules! emit_token(($token_type:expr) => {{
+                emit!(Ok(Token {
+                    token_type: $token_type,
+                    span: Span::from(start_loc, loc!())
+                }))
+            }});
+            /// Emits an error item.
+            macro_rules! emit_error(($error_value:expr) => {{
+                emit!(Err($error_value))
+            }});
+
+            let char = match next_char!() {
+                Some(char) => char,
+                None => {
+                    emit_token!(TokenType::EndOfInput);
+                    #[cfg(nightly)] break
+                },
+            };
 
             match char {
                 // Grouping
