@@ -153,48 +153,62 @@ pub fn next_token(
             }
         }});
         /// Gets the next character only if it matches the predicate.
-        macro_rules! next_char_if(($test:expr) => {{
-            match source.peek() {
-                Some(c) if $test(*c) => next_char!(),
-                _ => None,
-            }
-        }});
-        /// Gets the next character only if it is exactly the supplied character.
-        macro_rules! next_char_is(($expected:expr) => {{
-            next_char_if!(|c| c == $expected).is_some()
-        }});
+        /// Pass either `== $expr`, `!= $expr`, or a predicate closure.
+        /// First two return true/false, while the predicate version returns
+        /// the character directly.
+        macro_rules! next_char_is {
+            ($test:expr) => {{
+                match source.peek() {
+                    Some(c) if $test(*c) => next_char!(),
+                    _ => None,
+                }
+            }};
+            (== $test:expr) => {{
+                next_char_is!(|c| c == $test).is_some()
+            }};
+            (!= $test:expr) => {{
+                next_char_is!(|c| c != $test).is_some()
+            }}
+        }
         /// Peeks if the next character matches the predicate.
-        macro_rules! peek_next_matches(($test:expr) => {{
-            match source.peek() {
-                Some(c) if $test(*c) => true,
-                _ => false,
-            }
-        }});
-        /// Peeks if the next character is equal to the given character.
-        macro_rules! peek_next(($expected:expr) => {{
-            peek_next_matches!(|c| c == $expected)
-        }});
+        macro_rules! peek_next {
+            ($test:expr) => {{
+                match source.peek() {
+                    Some(c) if $test(*c) => true,
+                    _ => false,
+                }
+            }};
+            (== $expected:expr) => {{
+                peek_next!(|c| c == $expected)
+            }};
+            (!= $expected:expr) => {{
+                peek_next!(|c| c != $expected)
+            }}
+        }
         /// Peeks if the character one beyond the next matches the predicate.
-        macro_rules! peek_two_ahead_matches(($test:expr) => {{
-            match source.clone().nth(1) {
-                Some(c) if $test(c) => true,
-                _ => false,
-            }
-        }});
-        /// Peeks if the character one beyond the next is equal to the given character.
-        #[expect(unused_macros, reason = "parity with peek_next")]
-        macro_rules! peek_two_ahead(($expected:expr) => {{
-            peek_two_ahead_matches!(|c| c == $expected)
-        }});
+        macro_rules! peek_two_ahead {
+            ($test:expr) => {{
+                match source.clone().nth(1) {
+                    Some(c) if $test(c) => true,
+                    _ => false,
+                }
+            }};
+            (== $test:expr) => {{
+                peek_two_ahead!(|c| c == $test)
+            }};
+            (!= $test:expr) => {{
+                peek_two_ahead!(|c| c == $test)
+            }}
+        }
         /// Emits an item, via yield on nightly.
         #[cfg(nightly)]
         macro_rules! emit(($value:expr) => {{
-            yield $value
+            yield $value;
         }});
-        /// Emits an item, via break on nightly.
+        /// Emits an item, via break on stable.
         #[cfg(not(nightly))]
         macro_rules! emit(($value:expr) => {{
-            break $value
+            break $value;
         }});
         /// Emits a token of the given type, with a span from
         /// the start to the current position.
@@ -209,11 +223,14 @@ pub fn next_token(
             emit!(Err($error_value))
         }});
 
-        #[cfg_attr(not(nightly), expect(
-            clippy::redundant_else,
-            reason = "False positive in clippy::pedantic - if doesn't always exit the loop."
-        ))]
-        if let Some(char) = next_char!() {
+        let char = match next_char!() {
+            Some(char) => char,
+            None => {
+                emit_token!(TokenType::EndOfInput);
+                #[cfg(nightly)] break
+            },
+        };
+
             match char {
                 // Grouping
                 '(' => emit_token!(TokenType::LeftParen),
@@ -225,17 +242,17 @@ pub fn next_token(
                 '+' => emit_token!(TokenType::Plus),
                 '-' => emit_token!(TokenType::Minus),
                 '*' => emit_token!(TokenType::Star),
-                '/' if !peek_next!('/')
-                    && !peek_next!('*') => emit_token!(TokenType::Slash),
+                '/' if peek_next!(!= '/')
+                    && peek_next!(!= '*') => emit_token!(TokenType::Slash),
 
                 // Boolean Operators
-                '=' if next_char_is!('=') => emit_token!(TokenType::DoubleEquals),
-                '!' if next_char_is!('=') => emit_token!(TokenType::NotEquals),
-                '!'                       => emit_token!(TokenType::Not),
-                '>' if next_char_is!('=') => emit_token!(TokenType::GreaterThanEqual),
-                '>'                       => emit_token!(TokenType::GreaterThan),
-                '<' if next_char_is!('=') => emit_token!(TokenType::LessThanEqual),
-                '<'                       => emit_token!(TokenType::LessThan),
+                '=' if next_char_is!(== '=') => emit_token!(TokenType::DoubleEquals),
+                '!' if next_char_is!(== '=') => emit_token!(TokenType::NotEquals),
+                '!'                          => emit_token!(TokenType::Not),
+                '>' if next_char_is!(== '=') => emit_token!(TokenType::GreaterThanEqual),
+                '>'                          => emit_token!(TokenType::GreaterThan),
+                '<' if next_char_is!(== '=') => emit_token!(TokenType::LessThanEqual),
+                '<'                          => emit_token!(TokenType::LessThan),
 
                 // Special Operators
                 ',' => emit_token!(TokenType::Comma),
@@ -248,7 +265,7 @@ pub fn next_token(
                     let mut raw_string = vec!['"'];
                     let mut string = vec![];
                     // TODO Parsing.
-                    while let Some(c) = next_char_if!(|c| c != '"') {
+                    while let Some(c) = next_char_is!(|c| c != '"') {
                         raw_string.push(c);
                         string.push(c);
                     }
@@ -271,13 +288,13 @@ pub fn next_token(
                 }
                 c if is_digit(c) => {
                     let mut num = vec![c];
-                    while let Some(c) = next_char_if!(is_digit) {
+                    while let Some(c) = next_char_is!(is_digit) {
                         num.push(c);
                     }
-                    if peek_next!('.') && peek_two_ahead_matches!(is_digit) {
+                    if peek_next!(== '.') && peek_two_ahead!(is_digit) {
                         num.push(next_char!().unwrap());
                     }
-                    while let Some(c) = next_char_if!(is_digit) {
+                    while let Some(c) = next_char_is!(is_digit) {
                         num.push(c);
                     }
                     let num = num.into_iter().collect::<String>();
@@ -291,7 +308,7 @@ pub fn next_token(
                 // Identifiers and Keywords
                 c if is_alpha(c) => {
                     let mut ident: Vec<char> = vec![c];
-                    while let Some(c) = next_char_if!(is_alpha_num) {
+                    while let Some(c) = next_char_is!(is_alpha_num) {
                         ident.push(c);
                     }
                     let ident = ident.into_iter().collect::<String>();
@@ -305,13 +322,13 @@ pub fn next_token(
                 ' ' | '\t' | '\r' | '\n' => {} // just skip
 
                 // Comments
-                '/' if next_char_is!('/') => {
-                    while next_char_if!(|c| c != '\n').is_some() {
+                '/' if next_char_is!(== '/') => {
+                    while next_char_is!(!= '\n') {
                         // do nothing...
                     }
                     // continue to next try
                 }
-                '/' if next_char_is!('*') => {
+                '/' if next_char_is!(== '*') => {
                     let mut nesting = 1usize;
                     #[expect(
                         clippy::arithmetic_side_effects,
@@ -325,8 +342,8 @@ pub fn next_token(
                                     loc!(),
                                 )))
                             }
-                            Some('/') if next_char_is!('*') => nesting += 1,
-                            Some('*') if next_char_is!('/') => nesting -= 1,
+                            Some('/') if next_char_is!(== '*') => nesting += 1,
+                            Some('*') if next_char_is!(== '/') => nesting -= 1,
                             _ => {}
                         }
 
@@ -346,9 +363,6 @@ pub fn next_token(
                     ));
                 }
             }
-        } else {
-            emit_token!(TokenType::EndOfInput);
-            #[cfg(nightly)] break
         }
     }}
 }
