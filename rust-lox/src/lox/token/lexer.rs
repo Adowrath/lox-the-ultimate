@@ -17,7 +17,7 @@
 )]
 
 use crate::lox::token::tokens::{Token, TokenType, KEYWORDS};
-use crate::lox::types::{Identifier, Located, Location, LoxLiteral, Span};
+use crate::lox::types::{Identifier, Located, Location, RawLiteral, Span};
 use core::iter::Peekable;
 use core::str::FromStr;
 #[cfg(nightly)]
@@ -342,7 +342,7 @@ pub fn next_token<I: Iterator<Item=char> + Clone>(
                     raw_string.push('"');
                     let raw_string = raw_string.iter().collect::<String>();
                     let string = string.iter().collect::<String>();
-                    emit_token!(TokenType::Literal(LoxLiteral::String {
+                    emit_token!(TokenType::Literal(RawLiteral::String {
                         value: string,
                         raw: raw_string,
                     }));
@@ -359,7 +359,7 @@ pub fn next_token<I: Iterator<Item=char> + Clone>(
                         num.push(c);
                     }
                     let num = num.into_iter().collect::<String>();
-                    emit_token!(TokenType::Literal(LoxLiteral::Number {
+                    emit_token!(TokenType::Literal(RawLiteral::Number {
                         // SAFETY: The parsing above has verified a valid (floating-point) number literal.
                         value: unsafe {
                             f64::from_str(&num).unwrap_unchecked()
@@ -453,7 +453,7 @@ mod test {
     use crate::lox::token::tokens::Keyword::*;
     use crate::lox::token::tokens::TokenType::{self, *};
     use crate::lox::types::Identifier;
-    use crate::lox::types::LoxLiteral::*;
+    use crate::lox::types::RawLiteral::*;
 
     fn tokenize_no_spans(source: impl AsRef<str>) -> Vec<TokenType> {
         super::tokenize(source)

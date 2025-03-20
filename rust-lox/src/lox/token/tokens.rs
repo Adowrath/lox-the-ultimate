@@ -3,7 +3,7 @@ use core::fmt::{Display, Formatter};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::lox::types::{Identifier, Located, LoxLiteral};
+use crate::lox::types::{Identifier, Located, RawLiteral};
 use crate::lox::util::map;
 
 /// Keywords in the Lox language.
@@ -156,7 +156,7 @@ pub enum TokenType {
 
     // Literals
     /// A literal in the source code.
-    Literal(LoxLiteral),
+    Literal(RawLiteral),
 
     // Identifiers and Keywords
     /// A custom identifier

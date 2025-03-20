@@ -1,7 +1,7 @@
 //! Helper functionality to make Rust-Lox optionally fully Standards-conformant
 
 use crate::lox::token::tokens::{Token, TokenType};
-use crate::lox::types::{Located, LoxLiteral};
+use crate::lox::types::{Located, RawLiteral};
 
 pub trait LoxStdDisplay {
     fn std_display(&self) -> String;
@@ -33,9 +33,9 @@ impl LoxStdDisplay for Token {
             TokenType::Assign           => "EQUAL = null".to_owned(),
             TokenType::EndOfInput       => "EOF  null".to_owned(),
             TokenType::Literal(ref lit) => match *lit {
-                LoxLiteral::String { ref value, ref raw }
+                RawLiteral::String { ref value, ref raw }
                     => format!("STRING {raw} {value}"),
-                LoxLiteral::Number { ref value, ref raw }
+                RawLiteral::Number { ref value, ref raw }
                     => format!("NUMBER {raw} {value:.?}"),
             },
             TokenType::Keyword(ref kw)

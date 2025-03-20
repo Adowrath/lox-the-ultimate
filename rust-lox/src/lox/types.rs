@@ -57,14 +57,14 @@ impl Display for Span {
 #[expect(clippy::exhaustive_structs, reason = "this is set in stone")]
 pub struct Located<T>(pub T, pub Span);
 
-/// Literals inside the Lox Language, they carry with their value
+/// Raw Literals inside the Lox Language, they carry with their value
 /// the raw source code that was used to declare them.
 #[derive(Debug, PartialEq)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
 )]
-pub enum LoxLiteral {
+pub enum RawLiteral {
     /// A string, with no escape sequences supported currently.
     String {
         /// The parsed value of the string, used for any computations
@@ -83,13 +83,13 @@ pub enum LoxLiteral {
     },
 }
 
-impl LoxLiteral {
+impl RawLiteral {
     /// Extract the raw representation as it occurred
     /// in the source code.
     #[must_use]
     pub fn to_raw(&self) -> &str {
         match *self {
-            LoxLiteral::String { ref raw, .. } | LoxLiteral::Number { ref raw, .. } => raw.as_str(),
+            RawLiteral::String { ref raw, .. } | RawLiteral::Number { ref raw, .. } => raw.as_str(),
         }
     }
 }
