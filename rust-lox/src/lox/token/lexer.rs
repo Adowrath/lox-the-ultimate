@@ -459,7 +459,7 @@ mod test {
         super::tokenize(source)
             .expect("Tokenizing failed")
             .into_iter()
-            .map(|token| token.token_type)
+            .map(|token| token.0)
             .collect()
     }
 
@@ -474,7 +474,8 @@ mod test {
                 Literal(Number {
                     value: 20.0,
                     raw: "20".to_owned()
-                })
+                }),
+                EndOfInput
             ]
         );
     }
