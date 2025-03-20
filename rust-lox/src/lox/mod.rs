@@ -4,6 +4,7 @@
 // Shared functionality
 pub mod errors;
 pub mod types;
+pub mod ast;
 pub mod std;
 mod util;
 
