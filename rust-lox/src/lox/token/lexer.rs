@@ -91,10 +91,14 @@ pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>
 
 /// Input/State holder to the tokenizer, created from the source code.
 pub struct TokenizeInput<I: Iterator> {
+    /// The source iterator the tokenizing happens on,
+    /// wrapped in a Peekable.
     source: Peekable<I>,
 
+    /// The current line position in the source code.
     #[cfg(not(nightly))]
     line: usize,
+    /// The current column position in the source code.
     #[cfg(not(nightly))]
     col: usize,
 }
@@ -145,6 +149,14 @@ macro_rules! wrap_gen(($body:expr) => {{
 ///
 /// In case of an error, the characters stay consumed, so that lexing can continue
 /// past the error.
+///
+/// # Errors
+///
+/// The following errors are currently handled during the tokenization phase:
+///
+/// - Unexpected Symbols
+/// - Unterminated Multi-line Comments
+/// - Unterminated Strings
 #[expect(
     clippy::too_many_lines,
     reason = "Splitting this function into multiple would massively hurt its simplicity."
@@ -275,12 +287,9 @@ pub fn next_token<I: Iterator<Item=char> + Clone>(
                 emit!(Err($error_value))
             }});
 
-            let char = match next_char!() {
-                Some(char) => char,
-                None => {
-                    emit_token!(TokenType::EndOfInput);
-                    #[cfg(nightly)] break
-                },
+            let Some(char) = next_char!() else {
+                emit_token!(TokenType::EndOfInput);
+                #[cfg(nightly)] break
             };
 
             match char {
@@ -321,22 +330,22 @@ pub fn next_token<I: Iterator<Item=char> + Clone>(
                         raw_string.push(c);
                         string.push(c);
                     }
-                    if let Some('"') = next_char!() {
-                        raw_string.push('"');
-                        let raw_string = raw_string.iter().collect::<String>();
-                        let string = string.iter().collect::<String>();
-                        emit_token!(TokenType::Literal(LoxLiteral::String {
-                            value: string,
-                            raw: raw_string,
-                        }));
-                    } else {
+                    let Some('"') = next_char!() else {
                         // Correctness: Some(x) where x != '"' cannot happen,
                         // as the while loop consumed such a character.
                         emit_error!(LexingError::UnterminatedString(Span::from(
                             start_loc,
                             loc!(),
                         )));
-                    }
+                        #[cfg(nightly)] break
+                    };
+                    raw_string.push('"');
+                    let raw_string = raw_string.iter().collect::<String>();
+                    let string = string.iter().collect::<String>();
+                    emit_token!(TokenType::Literal(LoxLiteral::String {
+                        value: string,
+                        raw: raw_string,
+                    }));
                 }
                 c if is_digit(c) => {
                     let mut num = vec![c];
@@ -351,8 +360,10 @@ pub fn next_token<I: Iterator<Item=char> + Clone>(
                     }
                     let num = num.into_iter().collect::<String>();
                     emit_token!(TokenType::Literal(LoxLiteral::Number {
-                        value: f64::from_str(&num)
-                            .expect("if this fails, the parsing above failed already"),
+                        // SAFETY: The parsing above has verified a valid (floating-point) number literal.
+                        value: unsafe {
+                            f64::from_str(&num).unwrap_unchecked()
+                        },
                         raw: num,
                     }));
                 }
