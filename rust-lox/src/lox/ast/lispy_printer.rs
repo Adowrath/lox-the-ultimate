@@ -1,6 +1,7 @@
 use crate::lox::types::{Identifier, Located, RawLiteral};
-use super::{BinaryOp, Expr, Literal, PrefixOp};
+use super::{InfixOp, Expr, Literal, PrefixOp};
 
+/// A Lisp-y pretty print as defined by the book in Chapter 5.
 pub trait PrettyPrint {
     /// Generate a Lisp-y prettyprint.
     /// The default implementation simply calls [`Self::pretty_print_into`]
@@ -11,13 +12,80 @@ pub trait PrettyPrint {
         accumulator
     }
 
+    /// Generate the pretty-print into the given String buffer.
     fn pretty_print_into(&self, target: &mut String);
 }
 
-impl<T: PrettyPrint> PrettyPrint for Located<T> {
-    #[inline]
+/// Expand into Tuple Implementations for [`PrettyPrint`].
+macro_rules! tuple_impl {
+    ($param:ident) => {
+        tuple_impl!(@impl $param);
+    };
+    ($first:ident $($param:ident)+) => {
+        tuple_impl!($($param)+);
+        tuple_impl!(@impl $first $($param)+);
+    };
+    (@impl $($param:ident)+) => {
+        impl<$($param: PrettyPrint,)+> PrettyPrint for ($($param,)+) {
+            #[inline(always)]
+            #[expect(
+                non_snake_case,
+                clippy::min_ident_chars,
+                reason = "simpler to do this than to figure out how to get the index numbers"
+            )]
+            fn pretty_print_into(&self, target: &mut String) {
+                let ($(ref $param,)+) = *self;
+                $($param.pretty_print_into(target);)*
+            }
+        }
+    }
+}
+
+/// Simple wrapper that expands to a tuple of the values,
+/// calling [`PrettyPrint::pretty_print_into`] for the target.
+macro_rules! pp(($target:expr, $($val:expr),+ $(,)?) => {
+    ($($val),+).pretty_print_into($target)
+});
+
+tuple_impl!(A B C D E F G H I J K L M N O P Q R S T U V W X Y Z);
+
+impl<T: PrettyPrint + ?Sized> PrettyPrint for &T {
+    #[inline(always)]
+    #[expect(clippy::inline_always, reason = "always inlining these is always correct")]
     fn pretty_print_into(&self, target: &mut String) {
-        self.0.pretty_print_into(target);
+        pp!(target, **self);
+    }
+}
+
+impl<T: PrettyPrint + ?Sized> PrettyPrint for Box<T> {
+    #[inline(always)]
+    #[expect(clippy::inline_always, reason = "always inlining these is always correct")]
+    fn pretty_print_into(&self, target: &mut String) {
+        pp!(target, **self);
+    }
+}
+
+impl PrettyPrint for char {
+    #[inline(always)]
+    #[expect(clippy::inline_always, reason = "always inlining these is always correct")]
+    fn pretty_print_into(&self, target: &mut String) {
+        target.push(*self);
+    }
+}
+
+impl PrettyPrint for str {
+    #[inline(always)]
+    #[expect(clippy::inline_always, reason = "always inlining these is always correct")]
+    fn pretty_print_into(&self, target: &mut String) {
+        target.push_str(self);
+    }
+}
+
+impl<T: PrettyPrint> PrettyPrint for Located<T> {
+    #[inline(always)]
+    #[expect(clippy::inline_always, reason = "always inlining these is always correct")]
+    fn pretty_print_into(&self, target: &mut String) {
+        pp!(target, self.0);
     }
 }
 
@@ -25,47 +93,37 @@ impl PrettyPrint for Expr {
     fn pretty_print_into(&self, target: &mut String) {
         match *self {
             Expr::PrefixExpression { ref operator, ref expr } => {
-                target.push('(');
-                operator.pretty_print_into(target);
-                target.push(' ');
-                expr.pretty_print_into(target);
-                target.push(')');
+                pp!(target, '(', operator, ' ', expr, ')');
             }
-            Expr::BinaryOperation { ref operator, ref lhs, ref rhs } => {
-                target.push('(');
-                operator.pretty_print_into(target);
-                target.push(' ');
-                lhs.pretty_print_into(target);
-                target.push(' ');
-                rhs.pretty_print_into(target);
-                target.push(')');
+            Expr::InfixOperation { ref operator, ref lhs, ref rhs } => {
+                pp!(target, '(', operator, ' ', lhs, ' ', rhs, ')');
             }
             Expr::Parenthesized { ref expr, .. } => {
-                target.push_str("(group ");
-                expr.pretty_print_into(target);
-                target.push(')');
-            },
-            Expr::Identifier(ref id) => id.pretty_print_into(target),
-            Expr::Literal(ref lit) => lit.pretty_print_into(target),
+                pp!(target, "(group", expr, ')');
+            }
+            Expr::Identifier(ref id) => pp!(target, id),
+            Expr::Literal(ref lit) => pp!(target, lit),
         }
     }
 }
 
 impl PrettyPrint for Identifier {
+    #[inline]
     fn pretty_print_into(&self, target: &mut String) {
-        target.push_str(self.0.as_str());
+        pp!(target, self.0);
     }
 }
 
 impl PrettyPrint for Literal {
+    #[inline]
     fn pretty_print_into(&self, target: &mut String) {
         match *self {
             Literal::Raw(
                 RawLiteral::Number { ref raw, .. }
-                | RawLiteral::String { ref raw, ..}
-            ) => target.push_str(raw.as_str()),
-            Literal::Boolean(ref value) => target.push_str(value.to_string().as_ref()),
-            Literal::Nil => target.push_str("nil"),
+                | RawLiteral::String { ref raw, .. }
+            ) => pp!(target, raw),
+            Literal::Boolean(ref value) => pp!(target, value.to_string()),
+            Literal::Nil => pp!(target, "nil"),
         }
     }
 }
@@ -80,20 +138,20 @@ impl PrettyPrint for PrefixOp {
     }
 }
 
-impl PrettyPrint for BinaryOp {
+impl PrettyPrint for InfixOp {
     #[inline]
     fn pretty_print_into(&self, target: &mut String) {
         match *self {
-            BinaryOp::Plus => target.push('+'),
-            BinaryOp::Minus => target.push('-'),
-            BinaryOp::Multiply => target.push('*'),
-            BinaryOp::Divide => target.push('/'),
-            BinaryOp::Equals => target.push_str("=="),
-            BinaryOp::NotEquals => target.push_str("!="),
-            BinaryOp::LessThan => target.push('<'),
-            BinaryOp::LessThanEqual => target.push_str("<="),
-            BinaryOp::GreaterThan => target.push('>'),
-            BinaryOp::GreaterThanEqual => target.push_str(">="),
+            InfixOp::Plus => target.push('+'),
+            InfixOp::Minus => target.push('-'),
+            InfixOp::Multiply => target.push('*'),
+            InfixOp::Divide => target.push('/'),
+            InfixOp::Equals => target.push_str("=="),
+            InfixOp::NotEquals => target.push_str("!="),
+            InfixOp::LessThan => target.push('<'),
+            InfixOp::LessThanEqual => target.push_str("<="),
+            InfixOp::GreaterThan => target.push('>'),
+            InfixOp::GreaterThanEqual => target.push_str(">="),
         }
     }
 }
@@ -102,7 +160,7 @@ impl PrettyPrint for BinaryOp {
 mod test {
     use super::PrettyPrint;
     use crate::lox::types::{Located, Location, RawLiteral, Span};
-    use super::super::{Expr, Literal, PrefixOp, BinaryOp};
+    use super::super::{Expr, Literal, PrefixOp, InfixOp};
 
     #[test]
     fn simple_test() {
@@ -112,8 +170,8 @@ mod test {
         );
         assert_eq!(
             "(* (- 123) (group 45.67))",
-            Expr::BinaryOperation {
-                operator: Located(BinaryOp::Multiply, empty_span),
+            Expr::InfixOperation {
+                operator: Located(InfixOp::Multiply, empty_span),
                 lhs: Box::new(Expr::PrefixExpression {
                     operator: Located(PrefixOp::Negate, empty_span),
                     expr: Box::new(Expr::Literal(
