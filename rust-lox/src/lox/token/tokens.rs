@@ -3,7 +3,7 @@ use core::fmt::{Display, Formatter};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::lox::types::{Identifier, LoxLiteral, Span};
+use crate::lox::types::{Identifier, Located, LoxLiteral};
 use crate::lox::util::map;
 
 /// Keywords in the Lox language.
@@ -203,17 +203,10 @@ impl TokenType {
 }
 
 /// A thin wrapper that bundles the token type with a source span.
-#[derive(Debug, PartialEq)]
-#[expect(clippy::exhaustive_structs, reason = "fields are complete")]
-pub struct Token {
-    /// Type of this token.
-    pub token_type: TokenType,
-    /// Span the token takes up in source code.
-    pub span: Span,
-}
+pub type Token = Located<TokenType>;
 
 impl Display for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "<{} @ {}>", self.token_type.to_raw(), self.span)
+        write!(f, "<{} @ {}>", self.0.to_raw(), self.1)
     }
 }

@@ -4,8 +4,11 @@
 use core::fmt::{Display, Formatter};
 
 /// A Location simply consists of a line and column position.
-#[derive(Copy, Clone, Debug, PartialEq)]
-#[expect(clippy::exhaustive_structs, reason = "Locations are always line+col")]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "Locations are always line+col - if we ever switch to offset-based locations, this is a breaking change."
+)]
 pub struct Location {
     /// Line of the location, 0-indexed.
     pub line: usize,
@@ -48,6 +51,11 @@ impl Display for Span {
         }
     }
 }
+
+/// A Located value pairs a value with a source span.
+#[derive(Debug)]
+#[expect(clippy::exhaustive_structs, reason = "this is set in stone")]
+pub struct Located<T>(pub T, pub Span);
 
 /// Literals inside the Lox Language, they carry with their value
 /// the raw source code that was used to declare them.

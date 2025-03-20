@@ -1,7 +1,7 @@
 //! Helper functionality to make Rust-Lox optionally fully Standards-conformant
 
 use crate::lox::token::tokens::{Token, TokenType};
-use crate::lox::types::LoxLiteral;
+use crate::lox::types::{Located, LoxLiteral};
 
 pub trait LoxStdDisplay {
     fn std_display(&self) -> String;
@@ -9,7 +9,7 @@ pub trait LoxStdDisplay {
 
 impl LoxStdDisplay for Token {
     fn std_display(&self) -> String {
-        let Token { ref token_type, .. } = *self;
+        let Located(ref token_type, _) = *self;
 
         match *token_type {
             TokenType::LeftParen        => "LEFT_PAREN ( null".to_owned(),

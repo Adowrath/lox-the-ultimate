@@ -17,7 +17,7 @@
 )]
 
 use crate::lox::token::tokens::{Token, TokenType, KEYWORDS};
-use crate::lox::types::{Identifier, Location, LoxLiteral, Span};
+use crate::lox::types::{Identifier, Located, Location, LoxLiteral, Span};
 use core::iter::Peekable;
 use core::str::FromStr;
 #[cfg(nightly)]
@@ -64,10 +64,10 @@ pub fn tokenize<S: AsRef<str>>(source: S) -> Result<Vec<Token>, Vec<LexingError>
         tokens = vec![];
         loop {
             match next_token(&mut tokenize_input) {
-                Ok(token @ Token {
-                    token_type: TokenType::EndOfInput,
+                Ok(token @ Located(
+                    TokenType::EndOfInput,
                     ..
-                }) => {
+                )) => {
                     tokens.push(token);
                     break;
                 }
@@ -277,10 +277,10 @@ pub fn next_token<I: Iterator<Item=char> + Clone>(
             /// Emits a token of the given type, with a span from
             /// the start to the current position.
             macro_rules! emit_token(($token_type:expr) => {{
-                emit!(Ok(Token {
-                    token_type: $token_type,
-                    span: Span::from(start_loc, loc!())
-                }))
+                emit!(Ok(Located(
+                    $token_type,
+                    Span::from(start_loc, loc!())
+                )))
             }});
             /// Emits an error item.
             macro_rules! emit_error(($error_value:expr) => {{
