@@ -69,6 +69,19 @@ pub enum Expr {
     Identifier(l!(Identifier)),
     /// A literal
     Literal(l!(Literal)),
+    /// A Function call: `expr(expr, expr, ...)`
+    CallExpression {
+        /// Like for the parenthesized expression, this is necessary as we do not
+        /// separately keep track of the closing parenthesis.
+        source_span: Span,
+        callee: Box<Expr>,
+        arguments: Vec<Expr>,
+    },
+    /// A dotted path expression: `expr.name`
+    PathExpression {
+        receiver: Box<Expr>,
+        field_name: l!(Literal),
+    },
 }
 
 // Atomic pieces.
@@ -177,6 +190,15 @@ pub(crate) mod test {
                 Expr::Literal(lit) => {
                     lit.unlocate();
                 },
+                Expr::CallExpression { source_span, callee, arguments } => {
+                    *source_span = EMPTY_SPAN;
+                    callee.unlocate();
+                    arguments.iter_mut().for_each(Expr::unlocate);
+                }
+                Expr::PathExpression { receiver, field_name } => {
+                    receiver.unlocate();
+                    field_name.unlocate();
+                }
             }
         }
     }
