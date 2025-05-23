@@ -1,3 +1,7 @@
+//! The Abstract Syntax Tree representing the Lox language.
+//! Currently, the state of this is according to Chapter 5
+//! of the Crafting Interpreters book.
+//! It will be expanded with more of the syntax as the book progresses.
 pub mod lispy_printer;
 
 use crate::lox::types::{Identifier, RawLiteral, Span};
@@ -8,7 +12,34 @@ macro_rules! l(($t:ty) => {
     crate::lox::types::Located<$t>
 });
 
+#[derive(Debug, PartialEq)]
+pub struct Program {
+    declarations: Vec<Declaration>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Declaration {
+    VariableDeclaration(Span, l!(Identifier), Option<l!(Expr)>),
+    // FunctionDeclaration,
+    Statement(Statement),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Statement {
+    ExpressionStatement(Expr),
+    PrintStatement {
+        span: Span,
+        printed_expr: Expr
+    },
+}
+
 /// Expressions in the Lox language.
+/// Their Span will be computed via [`Span::merge`] from all its
+/// sub-spans, except for the following, which pre-compute it:
+///
+/// - Parenthesized expressions (both parentheses)
+/// - Function calls (trailing parenthesis)
+#[derive(Debug, PartialEq)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -27,12 +58,12 @@ pub enum Expr {
     },
     /// Parenthesized expression
     Parenthesized {
-        expr: Box<Expr>,
         /// This separate field is necessary as we do not keep track of the
         /// parentheses themselves. The alternative is to attach a location
         /// to every embedded Expression instead - this way, we can keep spans
         /// lazily computed as much as possible.
         source_span: Span,
+        expr: Box<Expr>,
     },
     /// An identifier
     Identifier(l!(Identifier)),
@@ -44,6 +75,7 @@ pub enum Expr {
 
 /// Literals, either a raw literal, or one covered by
 /// keywords (true/false, nil).
+#[derive(Debug, PartialEq)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -58,6 +90,7 @@ pub enum Literal {
 }
 
 /// Prefix operators.
+#[derive(Debug, PartialEq)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -70,6 +103,7 @@ pub enum PrefixOp {
 }
 
 /// Infix operators.
+#[derive(Debug, PartialEq)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -98,4 +132,75 @@ pub enum InfixOp {
     GreaterThan,
     /// `>=`
     GreaterThanEqual,
+}
+
+#[cfg(test)]
+pub(crate) mod test {
+    use std::sync::LazyLock;
+    use crate::lox::types::{Located, Location, RawLiteral, Span};
+    use super::{Expr, Literal, PrefixOp, InfixOp};
+
+    pub const EMPTY_SPAN: Span = Span::from(
+        Location { col: 0, line: 0 },
+        Location { col: 0, line: 0 },
+    );
+
+    pub trait Unlocate {
+        fn unlocate(&mut self);
+    }
+
+    impl<T> Unlocate for Located<T> {
+        fn unlocate(&mut self) {
+            self.1 = EMPTY_SPAN;
+        }
+    }
+
+    impl Unlocate for Expr {
+        fn unlocate(&mut self) {
+            match self {
+                Expr::PrefixExpression { operator, expr } => {
+                    operator.unlocate();
+                    expr.unlocate();
+                },
+                Expr::InfixOperation { operator, lhs, rhs } => {
+                    operator.unlocate();
+                    lhs.unlocate();
+                    rhs.unlocate();
+                },
+                Expr::Parenthesized { source_span, expr } => {
+                    *source_span = EMPTY_SPAN;
+                    expr.unlocate();
+                },
+                Expr::Identifier(id) => {
+                    id.unlocate();
+                },
+                Expr::Literal(lit) => {
+                    lit.unlocate();
+                },
+            }
+        }
+    }
+
+    pub static EXPR_EXAMPLE: LazyLock<Expr> = LazyLock::new(|| {
+        Expr::InfixOperation {
+            operator: Located(InfixOp::Multiply, EMPTY_SPAN),
+            lhs: Box::new(Expr::PrefixExpression {
+                operator: Located(PrefixOp::Negate, EMPTY_SPAN),
+                expr: Box::new(Expr::Literal(
+                    Located(
+                        Literal::Raw(RawLiteral::Number { raw: "123".to_owned(), value: 123f64 }),
+                        EMPTY_SPAN
+                    ))),
+            }),
+            rhs: Box::new(Expr::Parenthesized {
+                expr: Box::new(Expr::Literal(
+                    Located(
+                        Literal::Raw(RawLiteral::Number { raw: "45.67".to_owned(), value: 45.67f64 }),
+                        EMPTY_SPAN,
+                    )
+                )),
+                source_span: EMPTY_SPAN
+            }),
+        }
+    });
 }

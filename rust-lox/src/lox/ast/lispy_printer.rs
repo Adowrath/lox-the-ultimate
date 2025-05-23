@@ -1,3 +1,5 @@
+//! A Lisp-like pretty-printer as it was described in
+//! chapter 5 of Crafting Interpreters.
 use crate::lox::types::{Identifier, Located, RawLiteral};
 use super::{InfixOp, Expr, Literal, PrefixOp};
 
@@ -47,7 +49,7 @@ macro_rules! pp(($target:expr, $($val:expr),+ $(,)?) => {
     ($($val),+).pretty_print_into($target)
 });
 
-tuple_impl!(A B C D E F G H I J K L M N O P Q R S T U V W X Y Z);
+tuple_impl!(Z Y X W V U T S R Q P O N M L K J I H G F E D C B A);
 
 impl<T: PrettyPrint + ?Sized> PrettyPrint for &T {
     #[inline(always)]
@@ -99,7 +101,7 @@ impl PrettyPrint for Expr {
                 pp!(target, '(', operator, ' ', lhs, ' ', rhs, ')');
             }
             Expr::Parenthesized { ref expr, .. } => {
-                pp!(target, "(group", expr, ')');
+                pp!(target, "(group ", expr, ')');
             }
             Expr::Identifier(ref id) => pp!(target, id),
             Expr::Literal(ref lit) => pp!(target, lit),
@@ -159,37 +161,12 @@ impl PrettyPrint for InfixOp {
 #[cfg(test)]
 mod test {
     use super::PrettyPrint;
-    use crate::lox::types::{Located, Location, RawLiteral, Span};
-    use super::super::{Expr, Literal, PrefixOp, InfixOp};
 
     #[test]
     fn simple_test() {
-        let empty_span = Span::from(
-            Location { col: 0, line: 0 },
-            Location { col: 0, line: 0 },
-        );
         assert_eq!(
             "(* (- 123) (group 45.67))",
-            Expr::InfixOperation {
-                operator: Located(InfixOp::Multiply, empty_span),
-                lhs: Box::new(Expr::PrefixExpression {
-                    operator: Located(PrefixOp::Negate, empty_span),
-                    expr: Box::new(Expr::Literal(
-                        Located(
-                            Literal::Raw(RawLiteral::Number { raw: "123".to_owned(), value: 123f64 }),
-                            empty_span
-                        ))),
-                }),
-                rhs: Box::new(Expr::Parenthesized {
-                    expr: Box::new(Expr::Literal(
-                        Located(
-                            Literal::Raw(RawLiteral::Number { raw: "45.67".to_owned(), value: 45.67f64 }),
-                            empty_span,
-                        )
-                    )),
-                    source_span: empty_span
-                }),
-            }.pretty_print()
+            super::super::test::EXPR_EXAMPLE.pretty_print()
         );
     }
 }
