@@ -14,23 +14,71 @@ macro_rules! l(($t:ty) => {
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    declarations: Vec<Declaration>,
+    pub declarations: Vec<Declaration>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Declaration {
-    VariableDeclaration(Span, l!(Identifier), Option<l!(Expr)>),
-    // FunctionDeclaration,
+    VariableDeclaration {
+        assignee: l!(Identifier),
+        value: Option<Expr>
+    },
+    ClassDeclaration {
+        name: l!(Identifier),
+        funcs: Vec<FunctionDeclaration>
+    },
+    FunctionDeclaration(FunctionDeclaration),
     Statement(Statement),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FunctionDeclaration {
+    pub span: Span,
+    pub name: l!(Identifier),
+    pub parameters: Vec<l!(Identifier)>,
+    pub body: Vec<Declaration>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Statement {
     ExpressionStatement(Expr),
+    IfStatement {
+        // TODO Correct Spans?
+        // span: Span,
+        condition: Expr,
+        then_branch: Box<Statement>,
+        else_branch: Option<Box<Statement>>,
+    },
+    ForLoop {
+        // span: Span,
+        initializer: Option<ForInitializer>,
+        condition: Option<Expr>,
+        step: Option<Expr>,
+        body: Box<Statement>,
+    },
+    WhileLoop {
+        // span: Span,
+        condition: Expr,
+        body: Box<Statement>,
+    },
+    BlockStatement {
+        // span: Span,
+        body: Vec<Declaration>,
+    },
+    ReturnStatement(Option<Expr>),
     PrintStatement {
-        span: Span,
+        print_span: Span,
         printed_expr: Expr
     },
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ForInitializer {
+    VariableDeclaration {
+        assignee: l!(Identifier),
+        value: Option<Expr>
+    },
+    Expression(Expr),
 }
 
 /// Expressions in the Lox language.
@@ -74,14 +122,14 @@ pub enum Expr {
     CallExpression {
         /// Like for the parenthesized expression, this is necessary as we do not
         /// separately keep track of the closing parenthesis.
-        source_span: Span,
+        // source_span: Span,
         callee: Box<Expr>,
         arguments: Vec<Expr>,
     },
     /// A dotted path expression: `expr.name`
     PathExpression {
         receiver: Box<Expr>,
-        field_name: l!(Literal),
+        field_name: l!(Identifier),
     },
 }
 
@@ -133,11 +181,13 @@ pub enum InfixOp {
     /// `/`
     Divide,
 
-    // Logical
+    // Equality
     /// `==`
     Equals,
     /// `!=`
     NotEquals,
+
+    // Comparison
     /// `<`
     LessThan,
     /// `<=`
@@ -146,6 +196,44 @@ pub enum InfixOp {
     GreaterThan,
     /// `>=`
     GreaterThanEqual,
+
+    // Logical
+    /// `or`
+    Or,
+    /// `and`
+    And,
+
+    // Assignment
+    /// `=`
+    Assign,
+}
+
+impl InfixOp {
+    /// Higher Precedence binds tighter
+    pub fn precedence(&self) -> Precedence {
+        match self {
+            InfixOp::Assign => Precedence::Right(1),
+            InfixOp::Or => Precedence::Left(2),
+            InfixOp::And => Precedence::Left(3),
+
+            InfixOp::Equals
+            | InfixOp::NotEquals
+            | InfixOp::LessThan
+            | InfixOp::LessThanEqual
+            | InfixOp::GreaterThan
+            | InfixOp::GreaterThanEqual => Precedence::Left(4),
+
+            InfixOp::Plus
+            | InfixOp::Minus => Precedence::Left(5),
+            InfixOp::Multiply
+            | InfixOp::Divide => Precedence::Left(6),
+        }
+    }
+}
+
+pub enum Precedence {
+    Left(usize),
+    Right(usize)
 }
 
 #[cfg(test)]
@@ -191,8 +279,8 @@ pub(crate) mod test {
                 Expr::Literal(lit) => {
                     lit.unlocate();
                 },
-                Expr::CallExpression { source_span, callee, arguments } => {
-                    *source_span = EMPTY_SPAN;
+                Expr::CallExpression { /*source_span, */callee, arguments } => {
+                    // *source_span = EMPTY_SPAN;
                     callee.unlocate();
                     arguments.iter_mut().for_each(Expr::unlocate);
                 }
