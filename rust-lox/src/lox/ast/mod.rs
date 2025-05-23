@@ -67,6 +67,7 @@ pub enum Expr {
     },
     /// An identifier
     Identifier(l!(Identifier)),
+    // TODO: Resolved.
     /// A literal
     Literal(l!(Literal)),
     /// A Function call: `expr(expr, expr, ...)`

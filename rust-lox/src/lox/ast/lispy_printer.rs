@@ -105,6 +105,16 @@ impl PrettyPrint for Expr {
             }
             Expr::Identifier(ref id) => pp!(target, id),
             Expr::Literal(ref lit) => pp!(target, lit),
+            Expr::CallExpression { ref callee, ref arguments, .. } => {
+                pp!(target, "(call ", callee);
+                for argument in arguments {
+                    pp!(target, ' ', argument);
+                }
+                pp!(target, ')');
+            }
+            Expr::PathExpression { ref receiver, ref field_name } => {
+                pp!(target, receiver, '.', field_name);
+            }
         }
     }
 }
