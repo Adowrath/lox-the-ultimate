@@ -10,3 +10,4 @@ mod util;
 
 // Specific Phases
 pub mod token;
+pub mod parser;
