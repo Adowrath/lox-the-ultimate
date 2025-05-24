@@ -222,6 +222,8 @@ use lox::token::lexer;
 use std::fs;
 use std::io::{Error as IOError, Write};
 use std::process::{ExitCode, Termination};
+use crate::lox::{ast, parser};
+use crate::lox::parser::imperative::Parse;
 
 /// Load a file and run it through the interpreter.
 /// TODO: Currently, only lexes. Still needs to Parse and Validate.
@@ -257,6 +259,11 @@ fn run_prompt(_std_conformant: bool) -> Result<(), IOError> {
 
         let tokens = lexer::tokenize(&line);
         println!("{tokens:?}");
+
+        if let Ok(tokens) = tokens {
+            let result = ast::Program::parse(&parser::imperative::ParseInput::new(&tokens));
+            println!("Parse result: {result:?}");
+        }
     }
 }
 
