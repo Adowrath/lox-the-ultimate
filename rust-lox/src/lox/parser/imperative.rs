@@ -69,8 +69,7 @@ impl Parse<tokens::Token> for ast::Program {
     fn parse(tokens: &ParseInput<'_, tokens::Token>) -> Self::ParseResult {
         let mut declarations = Vec::new();
         while !tokens.is_empty() && !matches!(tokens.peek().0, tokens::TokenType::EndOfInput) {
-            let decl = ast::Declaration::parse(tokens);
-            declarations.push(decl);
+            declarations.push(ast::Declaration::parse(tokens));
         }
         ast::Program { declarations }
     }
@@ -93,37 +92,32 @@ impl Parse<tokens::Token> for ast::Declaration {
                     value,
                 }
             }
-            tokens::TokenType::Keyword(tokens::Keyword::Class) => {
-                let name = types::Located::<types::Identifier>::parse(tokens);
-                tokens.consume(tokens::TokenType::LeftBrace, "{");
-
-                let mut funcs = Vec::new();
-                loop {
-                    let next = tokens.next();
-                    match next.0 {
-                        tokens::TokenType::RightBrace => {
-                            break;
+            tokens::TokenType::Keyword(tokens::Keyword::Class) => Self::ClassDeclaration {
+                name: types::Located::parse(tokens),
+                funcs: {
+                    tokens.consume(tokens::TokenType::LeftBrace, "{");
+                    let mut funcs = Vec::new();
+                    loop {
+                        let next = tokens.next();
+                        match next.0 {
+                            tokens::TokenType::RightBrace => {
+                                break funcs;
+                            }
+                            tokens::TokenType::Identifier(ref id) => {
+                                funcs.push(parse_function_parts(
+                                    next.1,
+                                    types::Located(id.clone(), next.1),
+                                    tokens,
+                                ));
+                            }
+                            _ => panic!("Invalid token inside class declaration"),
                         }
-                        tokens::TokenType::Identifier(ref id) => {
-                            funcs.push(parse_function_parts(
-                                next.1,
-                                types::Located(id.clone(), next.1),
-                                tokens,
-                            ));
-                        }
-                        _ => panic!("Invalid token inside class declaration"),
                     }
-                }
-
-                Self::ClassDeclaration { name, funcs }
-            }
-            tokens::TokenType::Keyword(tokens::Keyword::Fun) => {
-                Self::FunctionDeclaration(parse_function_parts(
-                    *start_span,
-                    types::Located::<types::Identifier>::parse(tokens),
-                    tokens,
-                ))
-            }
+                },
+            },
+            tokens::TokenType::Keyword(tokens::Keyword::Fun) => Self::FunctionDeclaration(
+                parse_function_parts(*start_span, types::Located::parse(tokens), tokens),
+            ),
             _ => {
                 tokens.0.set(original_tokens);
                 Self::Statement(ast::Statement::parse(tokens))
@@ -135,7 +129,7 @@ impl Parse<tokens::Token> for ast::Declaration {
 fn parse_var_declaration(
     tokens: &ParseInput<'_, tokens::Token>,
 ) -> (types::Located<types::Identifier>, Option<ast::Expr>) {
-    let id = types::Located::<types::Identifier>::parse(tokens);
+    let id = types::Located::parse(tokens);
     let value = match tokens.peek().0 {
         tokens::TokenType::Semi => None,
         tokens::TokenType::Assign => {
@@ -170,7 +164,7 @@ fn parse_function_parts(
         };
         first = false;
 
-        parameters.push(types::Located::<types::Identifier>::parse(tokens));
+        parameters.push(types::Located::parse(tokens));
     }
     tokens.consume(tokens::TokenType::LeftBrace, "{");
 
@@ -203,62 +197,56 @@ impl Parse<tokens::Token> for ast::Statement {
         let types::Located(next, kw_loc) = tokens.next();
 
         match next {
-            tokens::TokenType::Keyword(tokens::Keyword::Print) => {
-                let expr = ast::Expr::parse(tokens);
-                tokens.consume(tokens::TokenType::Semi, ";");
-
-                Self::PrintStatement {
-                    print_span: *kw_loc,
-                    printed_expr: expr,
-                }
-            }
-            tokens::TokenType::Keyword(tokens::Keyword::If) => {
-                tokens.consume(tokens::TokenType::LeftParen, "(");
-                let condition = ast::Expr::parse(tokens);
-                tokens.consume(tokens::TokenType::RightParen, ")");
-
-                let then_branch = ast::Statement::parse(tokens);
-
-                let else_branch = match tokens.peek().0 {
+            tokens::TokenType::Keyword(tokens::Keyword::Print) => Self::PrintStatement {
+                print_span: *kw_loc,
+                printed_expr: {
+                    let expr = ast::Expr::parse(tokens);
+                    tokens.consume(tokens::TokenType::Semi, ";");
+                    expr
+                },
+            },
+            tokens::TokenType::Keyword(tokens::Keyword::If) => Self::IfStatement {
+                condition: {
+                    tokens.consume(tokens::TokenType::LeftParen, "(");
+                    let condition = ast::Expr::parse(tokens);
+                    tokens.consume(tokens::TokenType::RightParen, ")");
+                    condition
+                },
+                then_branch: Box::new(ast::Statement::parse(tokens)),
+                else_branch: match tokens.peek().0 {
                     tokens::TokenType::Keyword(tokens::Keyword::Else) => {
                         tokens.advance();
-                        Some(ast::Statement::parse(tokens))
+                        Some(Box::new(ast::Statement::parse(tokens)))
                     }
                     _ => None,
-                };
+                },
+            },
+            tokens::TokenType::Keyword(tokens::Keyword::For) => Self::ForLoop {
+                initializer: {
+                    tokens.consume(tokens::TokenType::LeftParen, "(");
+                    match tokens.peek().0 {
+                        tokens::TokenType::Semi => {
+                            tokens.advance();
+                            None
+                        }
+                        tokens::TokenType::Keyword(tokens::Keyword::Var) => {
+                            tokens.advance();
+                            let (id, value) = parse_var_declaration(tokens);
 
-                Self::IfStatement {
-                    condition,
-                    then_branch: Box::new(then_branch),
-                    else_branch: else_branch.map(Box::new),
-                }
-            }
-            tokens::TokenType::Keyword(tokens::Keyword::For) => {
-                tokens.consume(tokens::TokenType::LeftParen, "(");
+                            Some(ast::ForInitializer::VariableDeclaration {
+                                assignee: id,
+                                value,
+                            })
+                        }
+                        _ => {
+                            let expr = ast::Expr::parse(tokens);
+                            tokens.consume(tokens::TokenType::Semi, ";");
 
-                let initializer = match tokens.peek().0 {
-                    tokens::TokenType::Semi => {
-                        tokens.advance();
-                        None
+                            Some(ast::ForInitializer::Expression(expr))
+                        }
                     }
-                    tokens::TokenType::Keyword(tokens::Keyword::Var) => {
-                        tokens.advance();
-                        let (id, value) = parse_var_declaration(tokens);
-
-                        Some(ast::ForInitializer::VariableDeclaration {
-                            assignee: id,
-                            value,
-                        })
-                    }
-                    _ => {
-                        let expr = ast::Expr::parse(tokens);
-                        tokens.consume(tokens::TokenType::Semi, ";");
-
-                        Some(ast::ForInitializer::Expression(expr))
-                    }
-                };
-
-                let condition = match tokens.peek().0 {
+                },
+                condition: match tokens.peek().0 {
                     tokens::TokenType::Semi => {
                         tokens.advance();
                         None
@@ -268,9 +256,8 @@ impl Parse<tokens::Token> for ast::Statement {
                         tokens.consume(tokens::TokenType::Semi, ";");
                         Some(expr)
                     }
-                };
-
-                let step = match tokens.peek().0 {
+                },
+                step: match tokens.peek().0 {
                     tokens::TokenType::RightParen => {
                         tokens.advance();
                         None
@@ -280,27 +267,20 @@ impl Parse<tokens::Token> for ast::Statement {
                         tokens.consume(tokens::TokenType::RightParen, ")");
                         Some(expr)
                     }
-                };
-
-                Self::ForLoop {
-                    initializer,
-                    condition,
-                    step,
-                    body: Box::new(ast::Statement::parse(tokens)),
-                }
-            }
-            tokens::TokenType::Keyword(tokens::Keyword::While) => {
-                tokens.consume(tokens::TokenType::LeftParen, "(");
-                let condition = ast::Expr::parse(tokens);
-                tokens.consume(tokens::TokenType::RightParen, ")");
-
-                Self::WhileLoop {
-                    condition,
-                    body: Box::new(ast::Statement::parse(tokens)),
-                }
-            }
-            tokens::TokenType::Keyword(tokens::Keyword::Return) => {
-                let return_value = match tokens.peek().0 {
+                },
+                body: Box::new(ast::Statement::parse(tokens)),
+            },
+            tokens::TokenType::Keyword(tokens::Keyword::While) => Self::WhileLoop {
+                condition: {
+                    tokens.consume(tokens::TokenType::LeftParen, "(");
+                    let condition = ast::Expr::parse(tokens);
+                    tokens.consume(tokens::TokenType::RightParen, ")");
+                    condition
+                },
+                body: Box::new(ast::Statement::parse(tokens)),
+            },
+            tokens::TokenType::Keyword(tokens::Keyword::Return) => Self::ReturnStatement {
+                return_value: match tokens.peek().0 {
                     tokens::TokenType::Semi => {
                         tokens.advance();
                         None
@@ -308,30 +288,26 @@ impl Parse<tokens::Token> for ast::Statement {
                     _ => {
                         let expr = ast::Expr::parse(tokens);
                         tokens.consume(tokens::TokenType::Semi, ";");
-
                         Some(expr)
                     }
-                };
-
-                Self::ReturnStatement(return_value)
-            }
-            tokens::TokenType::LeftBrace => {
-                let mut body = Vec::new();
-
-                loop {
-                    match tokens.peek().0 {
-                        tokens::TokenType::RightBrace => {
-                            tokens.advance();
-                            break;
-                        }
-                        _ => {
-                            body.push(ast::Declaration::parse(tokens));
+                },
+            },
+            tokens::TokenType::LeftBrace => Self::BlockStatement {
+                body: {
+                    let mut body = Vec::new();
+                    loop {
+                        match tokens.peek().0 {
+                            tokens::TokenType::RightBrace => {
+                                tokens.advance();
+                                break body;
+                            }
+                            _ => {
+                                body.push(ast::Declaration::parse(tokens));
+                            }
                         }
                     }
-                }
-
-                Self::BlockStatement { body }
-            }
+                },
+            },
             _ => {
                 tokens.0.set(original_tokens);
                 let expr = ast::Expr::parse(tokens);
@@ -361,29 +337,29 @@ impl Parse<tokens::Token> for ast::Expr {
                     }
                 }
                 tokens::TokenType::Minus => ast::Expr::PrefixExpression {
-                    operator: types::Located(ast::PrefixOp::Negate, *start_span),
+                    operator: start_span.locate(ast::PrefixOp::Negate),
                     expr: Box::new(simple_expr(tokens)),
                 },
                 tokens::TokenType::Not => ast::Expr::PrefixExpression {
-                    operator: types::Located(ast::PrefixOp::Not, *start_span),
+                    operator: start_span.locate(ast::PrefixOp::Not),
                     expr: Box::new(simple_expr(tokens)),
                 },
                 tokens::TokenType::Literal(lit) => {
-                    ast::Expr::Literal(types::Located(ast::Literal::Raw(lit.clone()), *start_span))
+                    ast::Expr::Literal(start_span.locate(ast::Literal::Raw(lit.clone())))
                 }
                 tokens::TokenType::Identifier(id) => {
-                    ast::Expr::Identifier(types::Located(id.clone(), *start_span))
+                    ast::Expr::Identifier(start_span.locate(id.clone()))
                 }
                 tokens::TokenType::Keyword(tokens::Keyword::Nil) => {
-                    ast::Expr::Literal(types::Located(ast::Literal::Nil, *start_span))
+                    ast::Expr::Literal(start_span.locate(ast::Literal::Nil))
                 }
                 tokens::TokenType::Keyword(tokens::Keyword::True) => {
-                    ast::Expr::Literal(types::Located(ast::Literal::Boolean(true), *start_span))
+                    ast::Expr::Literal(start_span.locate(ast::Literal::Boolean(true)))
                 }
                 tokens::TokenType::Keyword(tokens::Keyword::False) => {
-                    ast::Expr::Literal(types::Located(ast::Literal::Boolean(false), *start_span))
+                    ast::Expr::Literal(start_span.locate(ast::Literal::Boolean(false)))
                 }
-                _ => panic!("Unexpected token {raw_next}"),
+                _ => panic!("Expected simple expression, found {raw_next}"),
             }
         }
 
@@ -397,8 +373,7 @@ impl Parse<tokens::Token> for ast::Expr {
 
                 let types::Located(next, start_span) = tokens.next();
 
-                let wrap_op =
-                    |op: ast::InfixOp| Some((types::Located(op, *start_span), simple_expr(tokens)));
+                let wrap_op = |op: ast::InfixOp| Some((start_span.locate(op), simple_expr(tokens)));
 
                 break match next {
                     tokens::TokenType::LeftParen => {
@@ -427,8 +402,7 @@ impl Parse<tokens::Token> for ast::Expr {
                         }
 
                         // Temporary Expression, taking a random location as it is not relevant.
-                        let mut temp_lhs =
-                            ast::Expr::Literal(types::Located(ast::Literal::Nil, *last_span));
+                        let mut temp_lhs = ast::Expr::Literal(last_span.locate(ast::Literal::Nil));
                         core::mem::swap(lhs, &mut temp_lhs);
                         *lhs = ast::Expr::CallExpression {
                             callee: Box::new(temp_lhs),
@@ -438,11 +412,10 @@ impl Parse<tokens::Token> for ast::Expr {
                         continue;
                     }
                     tokens::TokenType::Dot => {
-                        let field_name = types::Located::<types::Identifier>::parse(tokens);
+                        let field_name = types::Located::parse(tokens);
 
                         // Temporary Expression, taking a random location as it is not relevant.
-                        let mut temp_lhs =
-                            ast::Expr::Literal(types::Located(ast::Literal::Nil, *start_span));
+                        let mut temp_lhs = ast::Expr::Literal(start_span.locate(ast::Literal::Nil));
                         core::mem::swap(lhs, &mut temp_lhs);
                         *lhs = ast::Expr::PathExpression {
                             receiver: Box::new(temp_lhs),
@@ -535,12 +508,10 @@ impl Parse<tokens::Token> for ast::Expr {
         let mut lhs_ref = &mut lhs;
         loop {
             match continuation(lhs_ref, tokens) {
-                Some((op, new_rhs)) => {
-                    continuations.push((op, new_rhs));
-                    lhs_ref = &mut continuations.last_mut().unwrap().1;
-                }
+                Some(cont) => continuations.push(cont),
                 None => break,
             }
+            lhs_ref = &mut continuations.last_mut().unwrap().1;
         }
 
         let mut continuations = continuations.drain(..);
@@ -564,7 +535,7 @@ impl Parse<tokens::Token> for types::Located<types::Identifier> {
         let types::Located(next, loc) = tokens.next();
 
         match next {
-            tokens::TokenType::Identifier(id) => types::Located(id.clone(), *loc),
+            tokens::TokenType::Identifier(id) => loc.locate(id.clone()),
             _ => panic!("Expected identifier"),
         }
     }

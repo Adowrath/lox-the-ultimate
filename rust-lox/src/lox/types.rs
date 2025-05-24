@@ -52,6 +52,12 @@ impl Span {
     pub const fn from(start: Location, end: Location) -> Self {
         Span { start, end }
     }
+    
+    /// Construct a Located value from this Span.
+    #[must_use]
+    pub const fn locate<T>(self, value: T) -> Located<T> {
+        Located(value, self)
+    }
 
     /// Merges the given iterable of Spans. The iterable must NOT be empty!
     ///
@@ -103,6 +109,13 @@ pub struct Located<T>(pub T, pub Span);
 impl<T: PartialEq> PartialEq<T> for Located<T> {
     fn eq(&self, other: &T) -> bool {
         self.0 == *other
+    }
+}
+
+impl<T> Located<T> {
+    #[must_use]
+    pub fn map<U, F>(&self, f: F) -> Located<U> where F: FnOnce(&T) -> U {
+        Located(f(&self.0), self.1)
     }
 }
 

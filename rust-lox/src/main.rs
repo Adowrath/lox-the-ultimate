@@ -216,7 +216,6 @@ pub mod lox;
 use clap::{Parser, Subcommand};
 
 use lox::errors::EngineError;
-use lox::std::LoxStdDisplay;
 use lox::token::lexer;
 
 use std::fs;
@@ -228,18 +227,13 @@ use crate::lox::parser::imperative::Parse;
 /// Load a file and run it through the interpreter.
 /// TODO: Currently, only lexes. Still needs to Parse and Validate.
 /// TODO: Configure VM/X86 backend?
-fn run_file(file: String, std_conformant: bool) -> Result<(), EngineError> {
+fn run_file(file: String, _std_conformant: bool) -> Result<(), EngineError> {
     let source = fs::read_to_string(file)?;
     let tokens = lexer::tokenize(source)
         .map_err(EngineError::LexingErrors)?;
 
-    for token in tokens {
-        if std_conformant {
-            println!("{}", token.std_display());
-        } else {
-            println!("{token:?}");
-        }
-    }
+    let result = ast::Program::parse(&parser::imperative::ParseInput::new(&tokens));
+    println!("Parse result: {result:?}");
     Ok(())
 }
 
@@ -258,7 +252,6 @@ fn run_prompt(_std_conformant: bool) -> Result<(), IOError> {
         let _: usize = stdin.read_line(&mut line)?;
 
         let tokens = lexer::tokenize(&line);
-        println!("{tokens:?}");
 
         if let Ok(tokens) = tokens {
             let result = ast::Program::parse(&parser::imperative::ParseInput::new(&tokens));

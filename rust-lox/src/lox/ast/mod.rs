@@ -65,7 +65,9 @@ pub enum Statement {
         // span: Span,
         body: Vec<Declaration>,
     },
-    ReturnStatement(Option<Expr>),
+    ReturnStatement {
+        return_value: Option<Expr>
+    },
     PrintStatement {
         print_span: Span,
         printed_expr: Expr
