@@ -18,6 +18,20 @@ use crate::lox::types;
 
 pub struct ParseInput<'a, Token>(std::cell::Cell<&'a [Token]>);
 
+#[derive(Debug)]
+pub enum ParseError<'a, Token> {
+    EndOfInput,
+    UnexpectedToken {
+        expected: &'a str,
+        actual: &'a Token,
+    },
+    GenericError {
+        message: String,
+    },
+}
+
+type Result<'a, T, Token> = std::result::Result<T, ParseError<'a, Token>>;
+
 impl<'a, Token> ParseInput<'a, Token> {
     pub fn new<T>(token: &'a T) -> Self
     where
@@ -26,66 +40,88 @@ impl<'a, Token> ParseInput<'a, Token> {
         ParseInput(std::cell::Cell::new(&token))
     }
 
+    // TODO Backup, Restore.
+
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.get().is_empty()
     }
 
-    pub fn next(&self) -> &'a Token {
-        let (next, rest) = self.0.get().split_first().unwrap();
+    #[inline]
+    pub fn next(&self) -> Result<'a, &'a Token, Token> {
+        let (next, rest) = self.0.get().split_first().ok_or(ParseError::EndOfInput)?;
         self.0.set(rest);
-        next
+        Ok(next)
     }
 
-    pub fn consume<U>(&self, expected: U, expected_msg: &str) -> &'a Token
+    #[inline]
+    pub fn consume<U>(&self, expected: U, expected_msg: &'a str) -> Result<'a, &'a Token, Token>
     where
         Token: PartialEq<U>,
     {
-        let next = self.next();
+        let next = self.next()?;
         if *next == expected {
-            next
+            Ok(next)
         } else {
-            panic!("Expected {expected_msg}.")
+            Err(ParseError::UnexpectedToken {
+                expected: expected_msg,
+                actual: next,
+            })
         }
     }
 
-    pub fn peek(&self) -> &'a Token {
-        self.0.get().first().unwrap()
+    #[inline]
+    pub fn peek(&self) -> Result<'a, &'a Token, Token> {
+        self.0.get().first().ok_or(ParseError::EndOfInput)
     }
 
-    pub fn advance(&self) {
-        self.0.set(self.0.get().split_first().unwrap().1);
+    #[inline]
+    pub fn advance(&self) -> Result<'a, (), Token> {
+        let (_, rest) = self.0.get().split_first().ok_or(ParseError::EndOfInput)?;
+        self.0.set(rest);
+        Ok(())
     }
 }
 
 pub trait Parse<Token>: Sized {
     type ParseResult;
 
-    fn parse(tokens: &ParseInput<'_, Token>) -> Self::ParseResult;
+    fn parse<'a>(tokens: &ParseInput<'a, Token>) -> Result<'a, Self::ParseResult, Token>;
+
+    // TODO: fn recover(tokens: &ParseInput<'_, Token>) -> bool;
+    // Return value of true means "I am recovered, you can now continue".
+    // Return value of false means "I am not able to recover."
+    // If recovery can FAIL, you should not offer recovery. The higher level parser should handle it.
 }
 
 impl Parse<tokens::Token> for ast::Program {
     type ParseResult = Self;
 
-    fn parse(tokens: &ParseInput<'_, tokens::Token>) -> Self::ParseResult {
+    fn parse<'a>(
+        tokens: &ParseInput<'a, tokens::Token>,
+    ) -> Result<'a, Self::ParseResult, tokens::Token> {
         let mut declarations = Vec::new();
-        while !tokens.is_empty() && !matches!(tokens.peek().0, tokens::TokenType::EndOfInput) {
-            declarations.push(ast::Declaration::parse(tokens));
+        // TODO: EndOfInput should be removed as a fucking token it just makes problems...
+        while !tokens.is_empty() && !matches!(tokens.peek()?.0, tokens::TokenType::EndOfInput) {
+            declarations.push(ast::Declaration::parse(tokens)?);
         }
-        ast::Program { declarations }
+        Ok(ast::Program { declarations })
     }
 }
 
 impl Parse<tokens::Token> for ast::Declaration {
     type ParseResult = Self;
 
-    fn parse(tokens: &ParseInput<'_, tokens::Token>) -> Self::ParseResult {
+    fn parse<'a>(
+        tokens: &ParseInput<'a, tokens::Token>,
+    ) -> Result<'a, Self::ParseResult, tokens::Token> {
         let original_tokens = tokens.0.get();
 
-        let types::Located(next, start_span) = tokens.next();
+        let types::Located(next, start_span) = tokens.next()?;
 
-        match next {
+        Ok(match next {
             tokens::TokenType::Keyword(tokens::Keyword::Var) => {
-                let (id, value) = parse_var_declaration(tokens);
+                let (id, value) = parse_var_declaration(tokens)?;
 
                 Self::VariableDeclaration {
                     assignee: id,
@@ -93,12 +129,12 @@ impl Parse<tokens::Token> for ast::Declaration {
                 }
             }
             tokens::TokenType::Keyword(tokens::Keyword::Class) => Self::ClassDeclaration {
-                name: types::Located::parse(tokens),
+                name: types::Located::parse(tokens)?,
                 funcs: {
-                    tokens.consume(tokens::TokenType::LeftBrace, "{");
+                    tokens.consume(tokens::TokenType::LeftBrace, "{")?;
                     let mut funcs = Vec::new();
                     loop {
-                        let next = tokens.next();
+                        let next = tokens.next()?;
                         match next.0 {
                             tokens::TokenType::RightBrace => {
                                 break funcs;
@@ -108,130 +144,149 @@ impl Parse<tokens::Token> for ast::Declaration {
                                     next.1,
                                     types::Located(id.clone(), next.1),
                                     tokens,
-                                ));
+                                )?);
                             }
-                            _ => panic!("Invalid token inside class declaration"),
+                            _ => {
+                                return Err(ParseError::UnexpectedToken {
+                                    expected: "method declaration or closing }",
+                                    actual: next,
+                                });
+                            }
                         }
                     }
                 },
             },
             tokens::TokenType::Keyword(tokens::Keyword::Fun) => Self::FunctionDeclaration(
-                parse_function_parts(*start_span, types::Located::parse(tokens), tokens),
+                parse_function_parts(*start_span, types::Located::parse(tokens)?, tokens)?,
             ),
             _ => {
                 tokens.0.set(original_tokens);
-                Self::Statement(ast::Statement::parse(tokens))
+                Self::Statement(ast::Statement::parse(tokens)?)
             }
-        }
+        })
     }
 }
 
-fn parse_var_declaration(
-    tokens: &ParseInput<'_, tokens::Token>,
-) -> (types::Located<types::Identifier>, Option<ast::Expr>) {
-    let id = types::Located::parse(tokens);
-    let value = match tokens.peek().0 {
-        tokens::TokenType::Semi => None,
-        tokens::TokenType::Assign => {
-            tokens.advance();
-            Some(ast::Expr::parse(tokens))
+fn parse_var_declaration<'a>(
+    tokens: &ParseInput<'a, tokens::Token>,
+) -> Result<'a, (types::Located<types::Identifier>, Option<ast::Expr>), tokens::Token> {
+    let id = types::Located::parse(tokens)?;
+    let value = match tokens.peek()? {
+        types::Located(tokens::TokenType::Semi, _) => None,
+        types::Located(tokens::TokenType::Assign, _) => {
+            tokens.advance()?;
+            Some(ast::Expr::parse(tokens)?)
         }
-        _ => panic!("Invalid token inside variable declaration"),
+        other => Err(ParseError::UnexpectedToken {
+            expected: "; or =",
+            actual: other,
+        })?,
     };
-    tokens.consume(tokens::TokenType::Semi, ";");
+    tokens.consume(tokens::TokenType::Semi, ";")?;
 
-    (id, value)
+    Ok((id, value))
 }
 
-fn parse_function_parts(
+fn parse_function_parts<'a>(
     start_span: types::Span,
     name: types::Located<types::Identifier>,
-    tokens: &ParseInput<'_, tokens::Token>,
-) -> ast::FunctionDeclaration {
-    tokens.consume(tokens::TokenType::LeftParen, "(");
+    tokens: &ParseInput<'a, tokens::Token>,
+) -> Result<'a, ast::FunctionDeclaration, tokens::Token> {
+    tokens.consume(tokens::TokenType::LeftParen, "(")?;
 
-    let mut parameters = Vec::new();
     let mut first = true;
-    loop {
-        match tokens.peek().0 {
-            tokens::TokenType::RightParen => {
-                tokens.advance();
-                break;
-            }
-            tokens::TokenType::Comma if first => panic!("Expected identifier or )"),
-            tokens::TokenType::Comma => tokens.advance(),
-            _ => {} // will be consumed by identifier parsing
-        };
-        first = false;
+    let parameters = {
+        let mut parameters = Vec::new();
+        loop {
+            let next = tokens.peek()?;
+            match next.0 {
+                tokens::TokenType::RightParen => {
+                    tokens.advance()?;
+                    break parameters;
+                }
+                tokens::TokenType::Comma if first => {
+                    return Err(ParseError::UnexpectedToken {
+                        expected: "identifier or )",
+                        actual: next,
+                    });
+                }
+                tokens::TokenType::Comma => tokens.advance()?,
+                _ => {} // will be consumed by identifier parsing
+            };
+            first = false;
 
-        parameters.push(types::Located::parse(tokens));
-    }
-    tokens.consume(tokens::TokenType::LeftBrace, "{");
+            parameters.push(types::Located::parse(tokens)?);
+        }
+    };
+    tokens.consume(tokens::TokenType::LeftBrace, "{")?;
 
     let mut body = Vec::new();
     let last_span = loop {
-        match tokens.peek() {
+        match tokens.peek()? {
             types::Located(tokens::TokenType::RightBrace, last_loc) => {
-                tokens.advance();
+                tokens.advance()?;
                 break last_loc;
             }
             _ => {} // New declaration
         };
 
-        body.push(ast::Declaration::parse(tokens));
+        body.push(ast::Declaration::parse(tokens)?);
     };
 
-    ast::FunctionDeclaration {
+    Ok(ast::FunctionDeclaration {
         span: types::Span::merge(&vec![start_span, *last_span]),
         name,
         parameters,
         body,
-    }
+    })
 }
 
 impl Parse<tokens::Token> for ast::Statement {
     type ParseResult = Self;
 
-    fn parse(tokens: &ParseInput<'_, tokens::Token>) -> Self::ParseResult {
+    fn parse<'a>(
+        tokens: &ParseInput<'a, tokens::Token>,
+    ) -> Result<'a, Self::ParseResult, tokens::Token> {
         let original_tokens = tokens.0.get();
-        let types::Located(next, kw_loc) = tokens.next();
+        let types::Located(next, kw_loc) = tokens.next()?;
 
-        match next {
+        Ok(match next {
             tokens::TokenType::Keyword(tokens::Keyword::Print) => Self::PrintStatement {
                 print_span: *kw_loc,
                 printed_expr: {
-                    let expr = ast::Expr::parse(tokens);
-                    tokens.consume(tokens::TokenType::Semi, ";");
+                    let expr = ast::Expr::parse(tokens)?;
+                    tokens.consume(tokens::TokenType::Semi, ";")?;
                     expr
                 },
             },
             tokens::TokenType::Keyword(tokens::Keyword::If) => Self::IfStatement {
                 condition: {
-                    tokens.consume(tokens::TokenType::LeftParen, "(");
-                    let condition = ast::Expr::parse(tokens);
-                    tokens.consume(tokens::TokenType::RightParen, ")");
+                    tokens.consume(tokens::TokenType::LeftParen, "(")?;
+                    let condition = ast::Expr::parse(tokens)?;
+                    tokens.consume(tokens::TokenType::RightParen, ")")?;
                     condition
                 },
-                then_branch: Box::new(ast::Statement::parse(tokens)),
-                else_branch: match tokens.peek().0 {
+                then_branch: Box::new(ast::Statement::parse(tokens)?),
+                else_branch: match tokens.peek()?.0 {
                     tokens::TokenType::Keyword(tokens::Keyword::Else) => {
-                        tokens.advance();
-                        Some(Box::new(ast::Statement::parse(tokens)))
+                        tokens.advance()?;
+                        Some(Box::new(ast::Statement::parse(tokens)?))
                     }
+                    // TODO EndOfInput would be valid here! And should not advance!
                     _ => None,
                 },
             },
             tokens::TokenType::Keyword(tokens::Keyword::For) => Self::ForLoop {
                 initializer: {
-                    tokens.consume(tokens::TokenType::LeftParen, "(");
-                    match tokens.peek().0 {
+                    tokens.consume(tokens::TokenType::LeftParen, "(")?;
+                    match tokens.peek()?.0 {
                         tokens::TokenType::Semi => {
-                            tokens.advance();
+                            tokens.advance()?;
                             None
                         }
                         tokens::TokenType::Keyword(tokens::Keyword::Var) => {
-                            tokens.advance();
-                            let (id, value) = parse_var_declaration(tokens);
+                            tokens.advance()?;
+                            let (id, value) = parse_var_declaration(tokens)?;
 
                             Some(ast::ForInitializer::VariableDeclaration {
                                 assignee: id,
@@ -239,55 +294,55 @@ impl Parse<tokens::Token> for ast::Statement {
                             })
                         }
                         _ => {
-                            let expr = ast::Expr::parse(tokens);
-                            tokens.consume(tokens::TokenType::Semi, ";");
+                            let expr = ast::Expr::parse(tokens)?;
+                            tokens.consume(tokens::TokenType::Semi, ";")?;
 
                             Some(ast::ForInitializer::Expression(expr))
                         }
                     }
                 },
-                condition: match tokens.peek().0 {
+                condition: match tokens.peek()?.0 {
                     tokens::TokenType::Semi => {
-                        tokens.advance();
+                        tokens.advance()?;
                         None
                     }
                     _ => {
-                        let expr = ast::Expr::parse(tokens);
-                        tokens.consume(tokens::TokenType::Semi, ";");
+                        let expr = ast::Expr::parse(tokens)?;
+                        tokens.consume(tokens::TokenType::Semi, ";")?;
                         Some(expr)
                     }
                 },
-                step: match tokens.peek().0 {
+                step: match tokens.peek()?.0 {
                     tokens::TokenType::RightParen => {
-                        tokens.advance();
+                        tokens.advance()?;
                         None
                     }
                     _ => {
-                        let expr = ast::Expr::parse(tokens);
-                        tokens.consume(tokens::TokenType::RightParen, ")");
+                        let expr = ast::Expr::parse(tokens)?;
+                        tokens.consume(tokens::TokenType::RightParen, ")")?;
                         Some(expr)
                     }
                 },
-                body: Box::new(ast::Statement::parse(tokens)),
+                body: Box::new(ast::Statement::parse(tokens)?),
             },
             tokens::TokenType::Keyword(tokens::Keyword::While) => Self::WhileLoop {
                 condition: {
-                    tokens.consume(tokens::TokenType::LeftParen, "(");
-                    let condition = ast::Expr::parse(tokens);
-                    tokens.consume(tokens::TokenType::RightParen, ")");
+                    tokens.consume(tokens::TokenType::LeftParen, "(")?;
+                    let condition = ast::Expr::parse(tokens)?;
+                    tokens.consume(tokens::TokenType::RightParen, ")")?;
                     condition
                 },
-                body: Box::new(ast::Statement::parse(tokens)),
+                body: Box::new(ast::Statement::parse(tokens)?),
             },
             tokens::TokenType::Keyword(tokens::Keyword::Return) => Self::ReturnStatement {
-                return_value: match tokens.peek().0 {
+                return_value: match tokens.peek()?.0 {
                     tokens::TokenType::Semi => {
-                        tokens.advance();
+                        tokens.advance()?;
                         None
                     }
                     _ => {
-                        let expr = ast::Expr::parse(tokens);
-                        tokens.consume(tokens::TokenType::Semi, ";");
+                        let expr = ast::Expr::parse(tokens)?;
+                        tokens.consume(tokens::TokenType::Semi, ";")?;
                         Some(expr)
                     }
                 },
@@ -296,13 +351,13 @@ impl Parse<tokens::Token> for ast::Statement {
                 body: {
                     let mut body = Vec::new();
                     loop {
-                        match tokens.peek().0 {
+                        match tokens.peek()?.0 {
                             tokens::TokenType::RightBrace => {
-                                tokens.advance();
+                                tokens.advance()?;
                                 break body;
                             }
                             _ => {
-                                body.push(ast::Declaration::parse(tokens));
+                                body.push(ast::Declaration::parse(tokens)?);
                             }
                         }
                     }
@@ -310,26 +365,30 @@ impl Parse<tokens::Token> for ast::Statement {
             },
             _ => {
                 tokens.0.set(original_tokens);
-                let expr = ast::Expr::parse(tokens);
-                tokens.consume(tokens::TokenType::Semi, ";");
+                let expr = ast::Expr::parse(tokens)?;
+                tokens.consume(tokens::TokenType::Semi, ";")?;
 
                 Self::ExpressionStatement(expr)
             }
-        }
+        })
     }
 }
 
 impl Parse<tokens::Token> for ast::Expr {
     type ParseResult = Self;
 
-    fn parse(tokens: &ParseInput<'_, tokens::Token>) -> Self::ParseResult {
-        fn simple_expr(tokens: &ParseInput<'_, tokens::Token>) -> ast::Expr {
-            let raw_next @ types::Located(next, start_span) = tokens.next();
+    fn parse<'a>(
+        tokens: &ParseInput<'a, tokens::Token>,
+    ) -> Result<'a, Self::ParseResult, tokens::Token> {
+        fn simple_expr<'a>(
+            tokens: &ParseInput<'a, tokens::Token>,
+        ) -> Result<'a, ast::Expr, tokens::Token> {
+            let raw_next @ types::Located(next, start_span) = tokens.next()?;
 
-            match next {
+            Ok(match next {
                 tokens::TokenType::LeftParen => {
-                    let expr = ast::Expr::parse(tokens);
-                    let last_span = tokens.consume(tokens::TokenType::RightParen, ")").1;
+                    let expr = ast::Expr::parse(tokens)?;
+                    let last_span = tokens.consume(tokens::TokenType::RightParen, ")")?.1;
 
                     ast::Expr::Parenthesized {
                         source_span: types::Span::merge(vec![start_span, &last_span]),
@@ -338,11 +397,11 @@ impl Parse<tokens::Token> for ast::Expr {
                 }
                 tokens::TokenType::Minus => ast::Expr::PrefixExpression {
                     operator: start_span.locate(ast::PrefixOp::Negate),
-                    expr: Box::new(simple_expr(tokens)),
+                    expr: Box::new(simple_expr(tokens)?),
                 },
                 tokens::TokenType::Not => ast::Expr::PrefixExpression {
                     operator: start_span.locate(ast::PrefixOp::Not),
-                    expr: Box::new(simple_expr(tokens)),
+                    expr: Box::new(simple_expr(tokens)?),
                 },
                 tokens::TokenType::Literal(lit) => {
                     ast::Expr::Literal(start_span.locate(ast::Literal::Raw(lit.clone())))
@@ -359,21 +418,27 @@ impl Parse<tokens::Token> for ast::Expr {
                 tokens::TokenType::Keyword(tokens::Keyword::False) => {
                     ast::Expr::Literal(start_span.locate(ast::Literal::Boolean(false)))
                 }
-                _ => panic!("Expected simple expression, found {raw_next}"),
-            }
+                _ => {
+                    return Err(ParseError::UnexpectedToken {
+                        expected: "parenthesized expression, -, !, literal, identifier, nil, true, or false",
+                        actual: raw_next,
+                    });
+                }
+            })
         }
 
         fn continuation<'a>(
             lhs: &mut ast::Expr,
-            tokens: &ParseInput<'_, tokens::Token>,
-        ) -> Option<(types::Located<ast::InfixOp>, ast::Expr)> {
+            tokens: &ParseInput<'a, tokens::Token>,
+        ) -> Result<'a, Option<(types::Located<ast::InfixOp>, ast::Expr)>, tokens::Token> {
             let mut previous_tokens;
             loop {
                 previous_tokens = tokens.0.get();
 
-                let types::Located(next, start_span) = tokens.next();
+                let types::Located(next, start_span) = tokens.next()?;
 
-                let wrap_op = |op: ast::InfixOp| Some((start_span.locate(op), simple_expr(tokens)));
+                let wrap_op =
+                    |op: ast::InfixOp| Ok(Some((start_span.locate(op), simple_expr(tokens)?)));
 
                 break match next {
                     tokens::TokenType::LeftParen => {
@@ -382,23 +447,27 @@ impl Parse<tokens::Token> for ast::Expr {
                         let last_span;
 
                         loop {
-                            match tokens.peek() {
+                            let next = tokens.peek()?;
+                            match next {
                                 types::Located(tokens::TokenType::RightParen, span) => {
-                                    tokens.advance();
+                                    tokens.advance()?;
                                     last_span = span;
                                     break;
                                 }
                                 types::Located(tokens::TokenType::Comma, _) if first => {
-                                    panic!("expr or ) expected")
+                                    return Err(ParseError::UnexpectedToken {
+                                        expected: "identifier or )",
+                                        actual: next,
+                                    });
                                 }
                                 types::Located(tokens::TokenType::Comma, _) => {
-                                    tokens.advance();
+                                    tokens.advance()?;
                                 }
                                 _ => {} // any other token will be handled by the next expr check.
                             };
                             first = false;
 
-                            arguments.push(ast::Expr::parse(tokens));
+                            arguments.push(ast::Expr::parse(tokens)?);
                         }
 
                         // Temporary Expression, taking a random location as it is not relevant.
@@ -412,7 +481,7 @@ impl Parse<tokens::Token> for ast::Expr {
                         continue;
                     }
                     tokens::TokenType::Dot => {
-                        let field_name = types::Located::parse(tokens);
+                        let field_name = types::Located::parse(tokens)?;
 
                         // Temporary Expression, taking a random location as it is not relevant.
                         let mut temp_lhs = ast::Expr::Literal(start_span.locate(ast::Literal::Nil));
@@ -436,7 +505,7 @@ impl Parse<tokens::Token> for ast::Expr {
                     tokens::TokenType::Assign => wrap_op(ast::InfixOp::Assign),
                     _ => {
                         tokens.0.set(previous_tokens);
-                        None
+                        Ok(None)
                     }
                 };
             }
@@ -447,11 +516,15 @@ impl Parse<tokens::Token> for ast::Expr {
             mut first_op: types::Located<ast::InfixOp>,
             mut first_rhs: ast::Expr,
             continuations: &mut std::vec::Drain<'_, (types::Located<ast::InfixOp>, ast::Expr)>,
-        ) -> (ast::Expr, types::Located<ast::InfixOp>, ast::Expr, bool) {
+        ) -> std::result::Result<
+            (ast::Expr, types::Located<ast::InfixOp>, ast::Expr, bool),
+            // Error of two incompatible operators
+            (types::Located<ast::InfixOp>, types::Located<ast::InfixOp>),
+        > {
             let mut anything_happened = false;
             loop {
                 let (mut next_op, mut next_rhs) = match continuations.next() {
-                    None => return (lhs, first_op, first_rhs, anything_happened),
+                    None => return Ok((lhs, first_op, first_rhs, anything_happened)),
                     Some((op, rhs)) => (op, rhs),
                 };
                 anything_happened = true;
@@ -466,9 +539,7 @@ impl Parse<tokens::Token> for ast::Expr {
                         (ast::Precedence::Left(prec_l), ast::Precedence::Right(prec_r))
                         | (ast::Precedence::Right(prec_l), ast::Precedence::Left(prec_r)) => {
                             if prec_l == prec_r {
-                                panic!(
-                                    "Cannot mix operators with the same precedence but different associativity!"
-                                )
+                                return Err((first_op, next_op));
                             }
                             prec_l > prec_r
                         }
@@ -485,7 +556,7 @@ impl Parse<tokens::Token> for ast::Expr {
 
                     let inner_happen;
                     (first_rhs, next_op, next_rhs, inner_happen) =
-                        rebalance(first_rhs, next_op, next_rhs, continuations);
+                        rebalance(first_rhs, next_op, next_rhs, continuations)?;
                     if !inner_happen {
                         // If nothing happened inside, we're at the end - just merge.
                         first_rhs = ast::Expr::InfixOperation {
@@ -499,7 +570,7 @@ impl Parse<tokens::Token> for ast::Expr {
             }
         }
 
-        let mut lhs = simple_expr(tokens);
+        let mut lhs = simple_expr(tokens)?;
 
         // TODO Right now, this allocates the Vec for all continuations,
         // TODO but it would be nice to try if I can do this in a Streaming fashion
@@ -507,36 +578,50 @@ impl Parse<tokens::Token> for ast::Expr {
         let mut continuations = Vec::new();
         let mut lhs_ref = &mut lhs;
         loop {
-            match continuation(lhs_ref, tokens) {
+            match continuation(lhs_ref, tokens)? {
                 Some(cont) => continuations.push(cont),
                 None => break,
             }
-            lhs_ref = &mut continuations.last_mut().unwrap().1;
+            lhs_ref = &mut continuations
+                .last_mut()
+                .expect("We just inserted a value, it cannot be empty.")
+                .1;
         }
 
         let mut continuations = continuations.drain(..);
         let (lhs, op, rhs, _) = match continuations.next() {
-            Some((op, rhs)) => rebalance(lhs, op, rhs, &mut continuations),
-            None => return lhs,
+            Some((op, rhs)) =>
+                rebalance(lhs, op, rhs, &mut continuations)
+                    .map_err(|(left_op, right_op)| ParseError::GenericError {
+                        message: format!("{left_op:?} and {right_op:?} are not compatible - different associativities with the same precedence cannot appear ungrouped.")
+                    })?,
+            None => return Ok(lhs),
         };
 
-        ast::Expr::InfixOperation {
+        Ok(ast::Expr::InfixOperation {
             operator: op,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
-        }
+        })
     }
 }
 
 impl Parse<tokens::Token> for types::Located<types::Identifier> {
     type ParseResult = Self;
 
-    fn parse(tokens: &ParseInput<'_, tokens::Token>) -> Self::ParseResult {
-        let types::Located(next, loc) = tokens.next();
+    fn parse<'a>(
+        tokens: &ParseInput<'a, tokens::Token>,
+    ) -> Result<'a, Self::ParseResult, tokens::Token> {
+        let next = tokens.next()?;
 
-        match next {
-            tokens::TokenType::Identifier(id) => loc.locate(id.clone()),
-            _ => panic!("Expected identifier"),
-        }
+        Ok(match next.0 {
+            tokens::TokenType::Identifier(ref id) => next.1.locate(id.clone()),
+            _ => {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "identifier",
+                    actual: next,
+                });
+            }
+        })
     }
 }
