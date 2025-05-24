@@ -94,6 +94,18 @@ impl Display for Span {
 #[expect(clippy::exhaustive_structs, reason = "this is set in stone")]
 pub struct Located<T>(pub T, pub Span);
 
+/// This instance is for making comparisons between located
+/// values and the underlying types easier.
+/// 
+/// This notably *ignores* the Location information! Thus, no
+/// implementation in the other direction can be provided, as
+/// this would otherwise violate the transitivity rule. 
+impl<T: PartialEq> PartialEq<T> for Located<T> {
+    fn eq(&self, other: &T) -> bool {
+        self.0 == *other
+    }
+}
+
 /// Raw Literals inside the Lox Language, they carry with their value
 /// the raw source code that was used to declare them.
 #[derive(Clone, Debug, PartialEq)]

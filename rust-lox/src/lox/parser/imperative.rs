@@ -36,6 +36,18 @@ impl<'a, Token> ParseInput<'a, Token> {
         next
     }
 
+    pub fn consume<U>(&self, expected: U, expected_msg: &str) -> &'a Token
+    where
+        Token: PartialEq<U>,
+    {
+        let next = self.next();
+        if *next == expected {
+            next
+        } else {
+            panic!("Expected {expected_msg}.")
+        }
+    }
+
     pub fn peek(&self) -> &'a Token {
         self.0.get().first().unwrap()
     }
@@ -83,11 +95,7 @@ impl Parse<tokens::Token> for ast::Declaration {
             }
             tokens::TokenType::Keyword(tokens::Keyword::Class) => {
                 let name = types::Located::<types::Identifier>::parse(tokens);
-
-                match tokens.next().0 {
-                    tokens::TokenType::LeftBrace => {}
-                    _ => panic!("{{ expected"),
-                }
+                tokens.consume(tokens::TokenType::LeftBrace, "{");
 
                 let mut funcs = Vec::new();
                 loop {
@@ -136,11 +144,7 @@ fn parse_var_declaration(
         }
         _ => panic!("Invalid token inside variable declaration"),
     };
-
-    match tokens.next().0 {
-        tokens::TokenType::Semi => {}
-        _ => panic!("; expected"),
-    }
+    tokens.consume(tokens::TokenType::Semi, ";");
 
     (id, value)
 }
@@ -150,10 +154,7 @@ fn parse_function_parts(
     name: types::Located<types::Identifier>,
     tokens: &ParseInput<'_, tokens::Token>,
 ) -> ast::FunctionDeclaration {
-    match tokens.next().0 {
-        tokens::TokenType::LeftParen => {}
-        _ => panic!("( expected"),
-    }
+    tokens.consume(tokens::TokenType::LeftParen, "(");
 
     let mut parameters = Vec::new();
     let mut first = true;
@@ -171,11 +172,7 @@ fn parse_function_parts(
 
         parameters.push(types::Located::<types::Identifier>::parse(tokens));
     }
-
-    match tokens.next().0 {
-        tokens::TokenType::LeftBrace => {}
-        _ => panic!("{{ expected"),
-    }
+    tokens.consume(tokens::TokenType::LeftBrace, "{");
 
     let mut body = Vec::new();
     let last_span = loop {
@@ -208,11 +205,7 @@ impl Parse<tokens::Token> for ast::Statement {
         match next {
             tokens::TokenType::Keyword(tokens::Keyword::Print) => {
                 let expr = ast::Expr::parse(tokens);
-
-                match tokens.next().0 {
-                    tokens::TokenType::Semi => {}
-                    _ => panic!("; expected"),
-                }
+                tokens.consume(tokens::TokenType::Semi, ";");
 
                 Self::PrintStatement {
                     print_span: *kw_loc,
@@ -220,17 +213,9 @@ impl Parse<tokens::Token> for ast::Statement {
                 }
             }
             tokens::TokenType::Keyword(tokens::Keyword::If) => {
-                match tokens.next().0 {
-                    tokens::TokenType::LeftParen => {}
-                    _ => panic!("( expected"),
-                }
-
+                tokens.consume(tokens::TokenType::LeftParen, "(");
                 let condition = ast::Expr::parse(tokens);
-
-                match tokens.next().0 {
-                    tokens::TokenType::RightParen => {}
-                    _ => panic!(") expected"),
-                }
+                tokens.consume(tokens::TokenType::RightParen, ")");
 
                 let then_branch = ast::Statement::parse(tokens);
 
@@ -249,10 +234,7 @@ impl Parse<tokens::Token> for ast::Statement {
                 }
             }
             tokens::TokenType::Keyword(tokens::Keyword::For) => {
-                match tokens.next().0 {
-                    tokens::TokenType::LeftParen => {}
-                    _ => panic!("( expected"),
-                }
+                tokens.consume(tokens::TokenType::LeftParen, "(");
 
                 let initializer = match tokens.peek().0 {
                     tokens::TokenType::Semi => {
@@ -270,12 +252,7 @@ impl Parse<tokens::Token> for ast::Statement {
                     }
                     _ => {
                         let expr = ast::Expr::parse(tokens);
-
-                        let semi = tokens.next();
-                        match semi.0 {
-                            tokens::TokenType::Semi => {}
-                            _ => panic!("; expected"),
-                        }
+                        tokens.consume(tokens::TokenType::Semi, ";");
 
                         Some(ast::ForInitializer::Expression(expr))
                     }
@@ -288,10 +265,7 @@ impl Parse<tokens::Token> for ast::Statement {
                     }
                     _ => {
                         let expr = ast::Expr::parse(tokens);
-                        match tokens.next().0 {
-                            tokens::TokenType::Semi => {}
-                            _ => panic!("; expected"),
-                        };
+                        tokens.consume(tokens::TokenType::Semi, ";");
                         Some(expr)
                     }
                 };
@@ -303,10 +277,7 @@ impl Parse<tokens::Token> for ast::Statement {
                     }
                     _ => {
                         let expr = ast::Expr::parse(tokens);
-                        match tokens.next().0 {
-                            tokens::TokenType::RightParen => {}
-                            _ => panic!(") expected"),
-                        }
+                        tokens.consume(tokens::TokenType::RightParen, ")");
                         Some(expr)
                     }
                 };
@@ -319,17 +290,9 @@ impl Parse<tokens::Token> for ast::Statement {
                 }
             }
             tokens::TokenType::Keyword(tokens::Keyword::While) => {
-                match tokens.next().0 {
-                    tokens::TokenType::LeftParen => {}
-                    _ => panic!("( expected"),
-                }
-
+                tokens.consume(tokens::TokenType::LeftParen, "(");
                 let condition = ast::Expr::parse(tokens);
-
-                match tokens.next().0 {
-                    tokens::TokenType::RightParen => {}
-                    _ => panic!(") expected"),
-                }
+                tokens.consume(tokens::TokenType::RightParen, ")");
 
                 Self::WhileLoop {
                     condition,
@@ -344,10 +307,7 @@ impl Parse<tokens::Token> for ast::Statement {
                     }
                     _ => {
                         let expr = ast::Expr::parse(tokens);
-                        match tokens.next().0 {
-                            tokens::TokenType::Semi => {}
-                            _ => panic!("; expected"),
-                        }
+                        tokens.consume(tokens::TokenType::Semi, ";");
 
                         Some(expr)
                     }
@@ -375,11 +335,7 @@ impl Parse<tokens::Token> for ast::Statement {
             _ => {
                 tokens.0.set(original_tokens);
                 let expr = ast::Expr::parse(tokens);
-
-                match tokens.next().0 {
-                    tokens::TokenType::Semi => {}
-                    _ => panic!("; expected"),
-                }
+                tokens.consume(tokens::TokenType::Semi, ";");
 
                 Self::ExpressionStatement(expr)
             }
@@ -397,15 +353,10 @@ impl Parse<tokens::Token> for ast::Expr {
             match next {
                 tokens::TokenType::LeftParen => {
                     let expr = ast::Expr::parse(tokens);
-
-                    let semi = tokens.next();
-                    let last_span = match semi {
-                        types::Located(tokens::TokenType::RightParen, last_span) => last_span,
-                        _ => panic!(") expected"),
-                    };
+                    let last_span = tokens.consume(tokens::TokenType::RightParen, ")").1;
 
                     ast::Expr::Parenthesized {
-                        source_span: types::Span::merge(vec![start_span, last_span]),
+                        source_span: types::Span::merge(vec![start_span, &last_span]),
                         expr: Box::new(expr),
                     }
                 }
