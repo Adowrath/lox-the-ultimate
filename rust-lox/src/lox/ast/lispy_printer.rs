@@ -166,7 +166,7 @@ impl PrettyPrint for InfixOp {
             InfixOp::GreaterThanEqual => target.push_str(">="),
             InfixOp::Or => target.push_str("or"),
             InfixOp::And => target.push_str("and"),
-            InfixOp::Assign => target.push_str("="),
+            InfixOp::Assign => target.push('='),
         }
     }
 }

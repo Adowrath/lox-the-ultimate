@@ -138,7 +138,6 @@
     clippy::missing_asserts_for_indexing,
     clippy::missing_docs_in_private_items,
     clippy::missing_inline_in_public_items,
-    clippy::missing_trait_methods,
     clippy::mixed_read_write_in_expression,
     clippy::module_name_repetitions,
     clippy::modulo_arithmetic,
@@ -209,6 +208,8 @@
 // Sanity check for Nightly features.
 #[cfg(all(feature = "nightly", not(nightly)))]
 compile_error!("nightly feature cannot be used without a nightly toolchain (detected by rustversion)");
+
+extern crate alloc;
 
 // Modules and Imports
 pub mod lox;

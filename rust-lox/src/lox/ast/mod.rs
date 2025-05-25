@@ -2,6 +2,12 @@
 //! Currently, the state of this is according to Chapter 5
 //! of the Crafting Interpreters book.
 //! It will be expanded with more of the syntax as the book progresses.
+#![expect(
+    clippy::exhaustive_structs,
+    clippy::exhaustive_enums,
+    reason = "Extensions to the AST need to be handled."
+)]
+
 pub mod lispy_printer;
 
 use crate::lox::types::{Identifier, RawLiteral, Span};
@@ -21,11 +27,11 @@ pub struct Program {
 pub enum Declaration {
     VariableDeclaration {
         assignee: l!(Identifier),
-        value: Option<Expr>
+        value: Option<Expr>,
     },
     ClassDeclaration {
         name: l!(Identifier),
-        funcs: Vec<FunctionDeclaration>
+        funcs: Vec<FunctionDeclaration>,
     },
     FunctionDeclaration(FunctionDeclaration),
     Statement(Statement),
@@ -66,11 +72,11 @@ pub enum Statement {
         body: Vec<Declaration>,
     },
     ReturnStatement {
-        return_value: Option<Expr>
+        return_value: Option<Expr>,
     },
     PrintStatement {
         print_span: Span,
-        printed_expr: Expr
+        printed_expr: Expr,
     },
 }
 
@@ -78,7 +84,7 @@ pub enum Statement {
 pub enum ForInitializer {
     VariableDeclaration {
         assignee: l!(Identifier),
-        value: Option<Expr>
+        value: Option<Expr>,
     },
     Expression(Expr),
 }
@@ -212,8 +218,9 @@ pub enum InfixOp {
 
 impl InfixOp {
     /// Higher Precedence binds tighter
+    #[must_use]
     pub fn precedence(&self) -> Precedence {
-        match self {
+        match *self {
             InfixOp::Assign => Precedence::Right(1),
             InfixOp::Or => Precedence::Left(2),
             InfixOp::And => Precedence::Left(3),
@@ -225,29 +232,25 @@ impl InfixOp {
             | InfixOp::GreaterThan
             | InfixOp::GreaterThanEqual => Precedence::Left(4),
 
-            InfixOp::Plus
-            | InfixOp::Minus => Precedence::Left(5),
-            InfixOp::Multiply
-            | InfixOp::Divide => Precedence::Left(6),
+            InfixOp::Plus | InfixOp::Minus => Precedence::Left(5),
+            InfixOp::Multiply | InfixOp::Divide => Precedence::Left(6),
         }
     }
 }
 
 pub enum Precedence {
     Left(usize),
-    Right(usize)
+    Right(usize),
 }
 
 #[cfg(test)]
 pub(crate) mod test {
-    use std::sync::LazyLock;
+    use super::{Expr, InfixOp, Literal, PrefixOp};
     use crate::lox::types::{Located, Location, RawLiteral, Span};
-    use super::{Expr, Literal, PrefixOp, InfixOp};
+    use std::sync::LazyLock;
 
-    pub const EMPTY_SPAN: Span = Span::from(
-        Location { col: 0, line: 0 },
-        Location { col: 0, line: 0 },
-    );
+    pub const EMPTY_SPAN: Span =
+        Span::from(Location { col: 0, line: 0 }, Location { col: 0, line: 0 });
 
     pub trait Unlocate {
         fn unlocate(&mut self);
@@ -265,28 +268,34 @@ pub(crate) mod test {
                 Expr::PrefixExpression { operator, expr } => {
                     operator.unlocate();
                     expr.unlocate();
-                },
+                }
                 Expr::InfixOperation { operator, lhs, rhs } => {
                     operator.unlocate();
                     lhs.unlocate();
                     rhs.unlocate();
-                },
+                }
                 Expr::Parenthesized { source_span, expr } => {
                     *source_span = EMPTY_SPAN;
                     expr.unlocate();
-                },
+                }
                 Expr::Identifier(id) => {
                     id.unlocate();
-                },
+                }
                 Expr::Literal(lit) => {
                     lit.unlocate();
-                },
-                Expr::CallExpression { /*source_span, */callee, arguments } => {
+                }
+                Expr::CallExpression {
+                    /*source_span, */ callee,
+                    arguments,
+                } => {
                     // *source_span = EMPTY_SPAN;
                     callee.unlocate();
                     arguments.iter_mut().for_each(Expr::unlocate);
                 }
-                Expr::PathExpression { receiver, field_name } => {
+                Expr::PathExpression {
+                    receiver,
+                    field_name,
+                } => {
                     receiver.unlocate();
                     field_name.unlocate();
                 }
@@ -294,26 +303,27 @@ pub(crate) mod test {
         }
     }
 
-    pub static EXPR_EXAMPLE: LazyLock<Expr> = LazyLock::new(|| {
-        Expr::InfixOperation {
-            operator: Located(InfixOp::Multiply, EMPTY_SPAN),
-            lhs: Box::new(Expr::PrefixExpression {
-                operator: Located(PrefixOp::Negate, EMPTY_SPAN),
-                expr: Box::new(Expr::Literal(
-                    Located(
-                        Literal::Raw(RawLiteral::Number { raw: "123".to_owned(), value: 123f64 }),
-                        EMPTY_SPAN
-                    ))),
-            }),
-            rhs: Box::new(Expr::Parenthesized {
-                expr: Box::new(Expr::Literal(
-                    Located(
-                        Literal::Raw(RawLiteral::Number { raw: "45.67".to_owned(), value: 45.67f64 }),
-                        EMPTY_SPAN,
-                    )
-                )),
-                source_span: EMPTY_SPAN
-            }),
-        }
+    pub static EXPR_EXAMPLE: LazyLock<Expr> = LazyLock::new(|| Expr::InfixOperation {
+        operator: Located(InfixOp::Multiply, EMPTY_SPAN),
+        lhs: Box::new(Expr::PrefixExpression {
+            operator: Located(PrefixOp::Negate, EMPTY_SPAN),
+            expr: Box::new(Expr::Literal(Located(
+                Literal::Raw(RawLiteral::Number {
+                    raw: "123".to_owned(),
+                    value: 123f64,
+                }),
+                EMPTY_SPAN,
+            ))),
+        }),
+        rhs: Box::new(Expr::Parenthesized {
+            expr: Box::new(Expr::Literal(Located(
+                Literal::Raw(RawLiteral::Number {
+                    raw: "45.67".to_owned(),
+                    value: 45.67f64,
+                }),
+                EMPTY_SPAN,
+            ))),
+            source_span: EMPTY_SPAN,
+        }),
     });
 }

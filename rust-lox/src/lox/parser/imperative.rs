@@ -5,6 +5,11 @@
     reason = "Default cases are the only way to keep parsers sane"
 )]
 #![expect(
+    clippy::pattern_type_mismatch,
+    reason = "Enabling this would require constant & and ref placements that \
+    do not help the parsing at all."
+)]
+#![expect(
     clippy::missing_docs_in_private_items,
     clippy::exhaustive_enums,
     reason = "Temporary"
@@ -14,9 +19,9 @@ use crate::lox::ast;
 use crate::lox::token::tokens;
 use crate::lox::types;
 
-/// TODO Fault-tolerance.
+// TODO Fault-tolerance.
 
-pub struct ParseInput<'a, Token>(std::cell::Cell<&'a [Token]>);
+pub struct ParseInput<'a, Token>(core::cell::Cell<&'a [Token]>);
 
 #[derive(Debug)]
 pub enum ParseError<'a, Token> {
@@ -30,14 +35,14 @@ pub enum ParseError<'a, Token> {
     },
 }
 
-type Result<'a, T, Token> = std::result::Result<T, ParseError<'a, Token>>;
+type Result<'a, T, Token> = core::result::Result<T, ParseError<'a, Token>>;
 
 impl<'a, Token> ParseInput<'a, Token> {
     pub fn new<T>(token: &'a T) -> Self
     where
-        T: std::ops::Deref<Target = [Token]>,
+        T: core::ops::Deref<Target = [Token]>,
     {
-        ParseInput(std::cell::Cell::new(&token))
+        ParseInput(core::cell::Cell::new(token))
     }
 
     // TODO Backup, Restore.
@@ -47,6 +52,9 @@ impl<'a, Token> ParseInput<'a, Token> {
         self.0.get().is_empty()
     }
 
+    /// # Errors
+    ///
+    /// Returns an Error if we are at the end of input.
     #[inline]
     pub fn next(&self) -> Result<'a, &'a Token, Token> {
         let (next, rest) = self.0.get().split_first().ok_or(ParseError::EndOfInput)?;
@@ -54,6 +62,12 @@ impl<'a, Token> ParseInput<'a, Token> {
         Ok(next)
     }
 
+    /// Consumes a required token. Do not use this to check for optional tokens.
+    ///
+    /// # Errors
+    ///
+    /// Returns an Error if we are at the end of input,
+    /// or an unexpected token was found.
     #[inline]
     pub fn consume<U>(&self, expected: U, expected_msg: &'a str) -> Result<'a, &'a Token, Token>
     where
@@ -61,6 +75,7 @@ impl<'a, Token> ParseInput<'a, Token> {
     {
         let next = self.next()?;
         if *next == expected {
+            drop(expected);
             Ok(next)
         } else {
             Err(ParseError::UnexpectedToken {
@@ -70,11 +85,17 @@ impl<'a, Token> ParseInput<'a, Token> {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an Error if we are at the end of input.
     #[inline]
     pub fn peek(&self) -> Result<'a, &'a Token, Token> {
         self.0.get().first().ok_or(ParseError::EndOfInput)
     }
 
+    /// # Errors
+    ///
+    /// Returns an Error if we are at the end of input.
     #[inline]
     pub fn advance(&self) -> Result<'a, (), Token> {
         let (_, rest) = self.0.get().split_first().ok_or(ParseError::EndOfInput)?;
@@ -86,6 +107,11 @@ impl<'a, Token> ParseInput<'a, Token> {
 pub trait Parse<Token>: Sized {
     type ParseResult;
 
+    /// # Errors
+    ///
+    /// - End of Input was reached before parse was finished.
+    /// - An unexpected token was encountered.
+    /// - An error occurred while parsing that could not be resolved.
     fn parse<'a>(tokens: &ParseInput<'a, Token>) -> Result<'a, Self::ParseResult, Token>;
 
     // TODO: fn recover(tokens: &ParseInput<'_, Token>) -> bool;
@@ -177,10 +203,12 @@ fn parse_var_declaration<'a>(
             tokens.advance()?;
             Some(ast::Expr::parse(tokens)?)
         }
-        other => Err(ParseError::UnexpectedToken {
-            expected: "; or =",
-            actual: other,
-        })?,
+        other => {
+            return Err(ParseError::UnexpectedToken {
+                expected: "; or =",
+                actual: other,
+            });
+        }
     };
     tokens.consume(tokens::TokenType::Semi, ";")?;
 
@@ -212,7 +240,7 @@ fn parse_function_parts<'a>(
                 }
                 tokens::TokenType::Comma => tokens.advance()?,
                 _ => {} // will be consumed by identifier parsing
-            };
+            }
             first = false;
 
             parameters.push(types::Located::parse(tokens)?);
@@ -222,13 +250,10 @@ fn parse_function_parts<'a>(
 
     let mut body = Vec::new();
     let last_span = loop {
-        match tokens.peek()? {
-            types::Located(tokens::TokenType::RightBrace, last_loc) => {
-                tokens.advance()?;
-                break last_loc;
-            }
-            _ => {} // New declaration
-        };
+        if let types::Located(tokens::TokenType::RightBrace, last_loc) = tokens.peek()? {
+            tokens.advance()?;
+            break last_loc;
+        }
 
         body.push(ast::Declaration::parse(tokens)?);
     };
@@ -244,6 +269,10 @@ fn parse_function_parts<'a>(
 impl Parse<tokens::Token> for ast::Statement {
     type ParseResult = Self;
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Making this smaller does not improve readability."
+    )]
     fn parse<'a>(
         tokens: &ParseInput<'a, tokens::Token>,
     ) -> Result<'a, Self::ParseResult, tokens::Token> {
@@ -301,27 +330,21 @@ impl Parse<tokens::Token> for ast::Statement {
                         }
                     }
                 },
-                condition: match tokens.peek()?.0 {
-                    tokens::TokenType::Semi => {
-                        tokens.advance()?;
-                        None
-                    }
-                    _ => {
-                        let expr = ast::Expr::parse(tokens)?;
-                        tokens.consume(tokens::TokenType::Semi, ";")?;
-                        Some(expr)
-                    }
+                condition: if let tokens::TokenType::Semi = tokens.peek()?.0 {
+                    tokens.advance()?;
+                    None
+                } else {
+                    let expr = ast::Expr::parse(tokens)?;
+                    tokens.consume(tokens::TokenType::Semi, ";")?;
+                    Some(expr)
                 },
-                step: match tokens.peek()?.0 {
-                    tokens::TokenType::RightParen => {
-                        tokens.advance()?;
-                        None
-                    }
-                    _ => {
-                        let expr = ast::Expr::parse(tokens)?;
-                        tokens.consume(tokens::TokenType::RightParen, ")")?;
-                        Some(expr)
-                    }
+                step: if let tokens::TokenType::RightParen = tokens.peek()?.0 {
+                    tokens.advance()?;
+                    None
+                } else {
+                    let expr = ast::Expr::parse(tokens)?;
+                    tokens.consume(tokens::TokenType::RightParen, ")")?;
+                    Some(expr)
                 },
                 body: Box::new(ast::Statement::parse(tokens)?),
             },
@@ -335,16 +358,13 @@ impl Parse<tokens::Token> for ast::Statement {
                 body: Box::new(ast::Statement::parse(tokens)?),
             },
             tokens::TokenType::Keyword(tokens::Keyword::Return) => Self::ReturnStatement {
-                return_value: match tokens.peek()?.0 {
-                    tokens::TokenType::Semi => {
-                        tokens.advance()?;
-                        None
-                    }
-                    _ => {
-                        let expr = ast::Expr::parse(tokens)?;
-                        tokens.consume(tokens::TokenType::Semi, ";")?;
-                        Some(expr)
-                    }
+                return_value: if let tokens::TokenType::Semi = tokens.peek()?.0 {
+                    tokens.advance()?;
+                    None
+                } else {
+                    let expr = ast::Expr::parse(tokens)?;
+                    tokens.consume(tokens::TokenType::Semi, ";")?;
+                    Some(expr)
                 },
             },
             tokens::TokenType::LeftBrace => Self::BlockStatement {
@@ -377,6 +397,14 @@ impl Parse<tokens::Token> for ast::Statement {
 impl Parse<tokens::Token> for ast::Expr {
     type ParseResult = Self;
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Making this smaller does not improve readability."
+    )]
+    #[expect(
+        clippy::unwrap_in_result,
+        reason = "The expect is guaranteed to not fail."
+    )]
     fn parse<'a>(
         tokens: &ParseInput<'a, tokens::Token>,
     ) -> Result<'a, Self::ParseResult, tokens::Token> {
@@ -464,7 +492,7 @@ impl Parse<tokens::Token> for ast::Expr {
                                     tokens.advance()?;
                                 }
                                 _ => {} // any other token will be handled by the next expr check.
-                            };
+                            }
                             first = false;
 
                             arguments.push(ast::Expr::parse(tokens)?);
@@ -511,16 +539,17 @@ impl Parse<tokens::Token> for ast::Expr {
             }
         }
 
+        // Continuation after rebalancing - lhs, an operator, and the first rhs.
+        type RebalanceContinuation = (ast::Expr, types::Located<ast::InfixOp>, ast::Expr, bool);
+        // Error of two incompatible operators
+        type OpAssociativityError = (types::Located<ast::InfixOp>, types::Located<ast::InfixOp>);
+
         fn rebalance(
             mut lhs: ast::Expr,
             mut first_op: types::Located<ast::InfixOp>,
             mut first_rhs: ast::Expr,
-            continuations: &mut std::vec::Drain<'_, (types::Located<ast::InfixOp>, ast::Expr)>,
-        ) -> std::result::Result<
-            (ast::Expr, types::Located<ast::InfixOp>, ast::Expr, bool),
-            // Error of two incompatible operators
-            (types::Located<ast::InfixOp>, types::Located<ast::InfixOp>),
-        > {
+            continuations: &mut alloc::vec::Drain<'_, (types::Located<ast::InfixOp>, ast::Expr)>,
+        ) -> core::result::Result<RebalanceContinuation, OpAssociativityError> {
             let mut anything_happened = false;
             loop {
                 let (mut next_op, mut next_rhs) = match continuations.next() {
@@ -577,11 +606,9 @@ impl Parse<tokens::Token> for ast::Expr {
         // TODO with a custom iterator instead...
         let mut continuations = Vec::new();
         let mut lhs_ref = &mut lhs;
-        loop {
-            match continuation(lhs_ref, tokens)? {
-                Some(cont) => continuations.push(cont),
-                None => break,
-            }
+        while let Some(cont) = continuation(lhs_ref, tokens)? {
+            continuations.push(cont);
+
             lhs_ref = &mut continuations
                 .last_mut()
                 .expect("We just inserted a value, it cannot be empty.")
