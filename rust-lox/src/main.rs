@@ -233,7 +233,7 @@ fn run_file(file: String, _std_conformant: bool) -> Result<(), EngineError> {
     let tokens = lexer::tokenize(source)
         .map_err(EngineError::LexingErrors)?;
 
-    let result = ast::Program::parse(&parser::imperative::ParseInput::new(&tokens));
+    let result = ast::Program::parse(&parser::imperative::ParseState::new(&tokens));
     println!("Parse result: {result:?}");
     Ok(())
 }
@@ -255,7 +255,7 @@ fn run_prompt(_std_conformant: bool) -> Result<(), IOError> {
         let tokens = lexer::tokenize(&line);
 
         if let Ok(tokens) = tokens {
-            let result = ast::Program::parse(&parser::imperative::ParseInput::new(&tokens));
+            let result = ast::Program::parse(&parser::imperative::ParseState::new(&tokens));
             println!("Parse result: {result:?}");
         }
     }

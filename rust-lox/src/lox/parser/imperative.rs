@@ -21,7 +21,14 @@ use crate::lox::types;
 
 // TODO Fault-tolerance.
 
-pub struct ParseInput<'a, Token>(core::cell::Cell<&'a [Token]>);
+pub struct ParseState<'a, Token> {
+    input: core::cell::Cell<&'a [Token]>,
+    errors: core::cell::RefCell<Vec<ParseError<'a, Token>>>,
+}
+
+pub struct ParseStateBackup<'a, Token> {
+    input: &'a [Token],
+}
 
 #[derive(Debug)]
 pub enum ParseError<'a, Token> {
@@ -37,19 +44,32 @@ pub enum ParseError<'a, Token> {
 
 type Result<'a, T, Token> = core::result::Result<T, ParseError<'a, Token>>;
 
-impl<'a, Token> ParseInput<'a, Token> {
+impl<'a, Token> ParseState<'a, Token> {
     pub fn new<T>(token: &'a T) -> Self
     where
         T: core::ops::Deref<Target = [Token]>,
     {
-        ParseInput(core::cell::Cell::new(token))
+        ParseState {
+            input: core::cell::Cell::new(token),
+            errors: core::cell::RefCell::new(Vec::new()),
+        }
     }
 
-    // TODO Backup, Restore.
+    #[inline]
+    pub fn backup(&self) -> ParseStateBackup<'a, Token> {
+        ParseStateBackup {
+            input: self.input.get(),
+        }
+    }
+
+    #[inline]
+    pub fn restore(&self, backup: ParseStateBackup<'a, Token>) {
+        self.input.set(backup.input);
+    }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.0.get().is_empty()
+        self.input.get().is_empty()
     }
 
     /// # Errors
@@ -57,8 +77,12 @@ impl<'a, Token> ParseInput<'a, Token> {
     /// Returns an Error if we are at the end of input.
     #[inline]
     pub fn next(&self) -> Result<'a, &'a Token, Token> {
-        let (next, rest) = self.0.get().split_first().ok_or(ParseError::EndOfInput)?;
-        self.0.set(rest);
+        let (next, rest) = self
+            .input
+            .get()
+            .split_first()
+            .ok_or(ParseError::EndOfInput)?;
+        self.input.set(rest);
         Ok(next)
     }
 
@@ -90,7 +114,7 @@ impl<'a, Token> ParseInput<'a, Token> {
     /// Returns an Error if we are at the end of input.
     #[inline]
     pub fn peek(&self) -> Result<'a, &'a Token, Token> {
-        self.0.get().first().ok_or(ParseError::EndOfInput)
+        self.input.get().first().ok_or(ParseError::EndOfInput)
     }
 
     /// # Errors
@@ -98,8 +122,12 @@ impl<'a, Token> ParseInput<'a, Token> {
     /// Returns an Error if we are at the end of input.
     #[inline]
     pub fn advance(&self) -> Result<'a, (), Token> {
-        let (_, rest) = self.0.get().split_first().ok_or(ParseError::EndOfInput)?;
-        self.0.set(rest);
+        let (_, rest) = self
+            .input
+            .get()
+            .split_first()
+            .ok_or(ParseError::EndOfInput)?;
+        self.input.set(rest);
         Ok(())
     }
 }
@@ -112,9 +140,9 @@ pub trait Parse<Token>: Sized {
     /// - End of Input was reached before parse was finished.
     /// - An unexpected token was encountered.
     /// - An error occurred while parsing that could not be resolved.
-    fn parse<'a>(tokens: &ParseInput<'a, Token>) -> Result<'a, Self::ParseResult, Token>;
+    fn parse<'a>(state: &ParseState<'a, Token>) -> Result<'a, Self::ParseResult, Token>;
 
-    // TODO: fn recover(tokens: &ParseInput<'_, Token>) -> bool;
+    // TODO: fn recover(state: &ParseState<'_, Token>) -> bool;
     // Return value of true means "I am recovered, you can now continue".
     // Return value of false means "I am not able to recover."
     // If recovery can FAIL, you should not offer recovery. The higher level parser should handle it.
@@ -124,12 +152,12 @@ impl Parse<tokens::Token> for ast::Program {
     type ParseResult = Self;
 
     fn parse<'a>(
-        tokens: &ParseInput<'a, tokens::Token>,
+        state: &ParseState<'a, tokens::Token>,
     ) -> Result<'a, Self::ParseResult, tokens::Token> {
         let mut declarations = Vec::new();
         // TODO: EndOfInput should be removed as a fucking token it just makes problems...
-        while !tokens.is_empty() && !matches!(tokens.peek()?.0, tokens::TokenType::EndOfInput) {
-            declarations.push(ast::Declaration::parse(tokens)?);
+        while !state.is_empty() && !matches!(state.peek()?.0, tokens::TokenType::EndOfInput) {
+            declarations.push(ast::Declaration::parse(state)?);
         }
         Ok(ast::Program { declarations })
     }
@@ -139,15 +167,15 @@ impl Parse<tokens::Token> for ast::Declaration {
     type ParseResult = Self;
 
     fn parse<'a>(
-        tokens: &ParseInput<'a, tokens::Token>,
+        state: &ParseState<'a, tokens::Token>,
     ) -> Result<'a, Self::ParseResult, tokens::Token> {
-        let original_tokens = tokens.0.get();
+        let backup = state.backup();
 
-        let types::Located(next, start_span) = tokens.next()?;
+        let types::Located(next, start_span) = state.next()?;
 
         Ok(match next {
             tokens::TokenType::Keyword(tokens::Keyword::Var) => {
-                let (id, value) = parse_var_declaration(tokens)?;
+                let (id, value) = parse_var_declaration(state)?;
 
                 Self::VariableDeclaration {
                     assignee: id,
@@ -155,12 +183,12 @@ impl Parse<tokens::Token> for ast::Declaration {
                 }
             }
             tokens::TokenType::Keyword(tokens::Keyword::Class) => Self::ClassDeclaration {
-                name: types::Located::parse(tokens)?,
+                name: types::Located::parse(state)?,
                 funcs: {
-                    tokens.consume(tokens::TokenType::LeftBrace, "{")?;
+                    state.consume(tokens::TokenType::LeftBrace, "{")?;
                     let mut funcs = Vec::new();
                     loop {
-                        let next = tokens.next()?;
+                        let next = state.next()?;
                         match next.0 {
                             tokens::TokenType::RightBrace => {
                                 break funcs;
@@ -169,7 +197,7 @@ impl Parse<tokens::Token> for ast::Declaration {
                                 funcs.push(parse_function_parts(
                                     next.1,
                                     types::Located(id.clone(), next.1),
-                                    tokens,
+                                    state,
                                 )?);
                             }
                             _ => {
@@ -183,25 +211,25 @@ impl Parse<tokens::Token> for ast::Declaration {
                 },
             },
             tokens::TokenType::Keyword(tokens::Keyword::Fun) => Self::FunctionDeclaration(
-                parse_function_parts(*start_span, types::Located::parse(tokens)?, tokens)?,
+                parse_function_parts(*start_span, types::Located::parse(state)?, state)?,
             ),
             _ => {
-                tokens.0.set(original_tokens);
-                Self::Statement(ast::Statement::parse(tokens)?)
+                state.restore(backup);
+                Self::Statement(ast::Statement::parse(state)?)
             }
         })
     }
 }
 
 fn parse_var_declaration<'a>(
-    tokens: &ParseInput<'a, tokens::Token>,
+    state: &ParseState<'a, tokens::Token>,
 ) -> Result<'a, (types::Located<types::Identifier>, Option<ast::Expr>), tokens::Token> {
-    let id = types::Located::parse(tokens)?;
-    let value = match tokens.peek()? {
+    let id = types::Located::parse(state)?;
+    let value = match state.peek()? {
         types::Located(tokens::TokenType::Semi, _) => None,
         types::Located(tokens::TokenType::Assign, _) => {
-            tokens.advance()?;
-            Some(ast::Expr::parse(tokens)?)
+            state.advance()?;
+            Some(ast::Expr::parse(state)?)
         }
         other => {
             return Err(ParseError::UnexpectedToken {
@@ -210,7 +238,7 @@ fn parse_var_declaration<'a>(
             });
         }
     };
-    tokens.consume(tokens::TokenType::Semi, ";")?;
+    state.consume(tokens::TokenType::Semi, ";")?;
 
     Ok((id, value))
 }
@@ -218,18 +246,18 @@ fn parse_var_declaration<'a>(
 fn parse_function_parts<'a>(
     start_span: types::Span,
     name: types::Located<types::Identifier>,
-    tokens: &ParseInput<'a, tokens::Token>,
+    state: &ParseState<'a, tokens::Token>,
 ) -> Result<'a, ast::FunctionDeclaration, tokens::Token> {
-    tokens.consume(tokens::TokenType::LeftParen, "(")?;
+    state.consume(tokens::TokenType::LeftParen, "(")?;
 
     let mut first = true;
     let parameters = {
         let mut parameters = Vec::new();
         loop {
-            let next = tokens.peek()?;
+            let next = state.peek()?;
             match next.0 {
                 tokens::TokenType::RightParen => {
-                    tokens.advance()?;
+                    state.advance()?;
                     break parameters;
                 }
                 tokens::TokenType::Comma if first => {
@@ -238,24 +266,24 @@ fn parse_function_parts<'a>(
                         actual: next,
                     });
                 }
-                tokens::TokenType::Comma => tokens.advance()?,
+                tokens::TokenType::Comma => state.advance()?,
                 _ => {} // will be consumed by identifier parsing
             }
             first = false;
 
-            parameters.push(types::Located::parse(tokens)?);
+            parameters.push(types::Located::parse(state)?);
         }
     };
-    tokens.consume(tokens::TokenType::LeftBrace, "{")?;
+    state.consume(tokens::TokenType::LeftBrace, "{")?;
 
     let mut body = Vec::new();
     let last_span = loop {
-        if let types::Located(tokens::TokenType::RightBrace, last_loc) = tokens.peek()? {
-            tokens.advance()?;
+        if let types::Located(tokens::TokenType::RightBrace, last_loc) = state.peek()? {
+            state.advance()?;
             break last_loc;
         }
 
-        body.push(ast::Declaration::parse(tokens)?);
+        body.push(ast::Declaration::parse(state)?);
     };
 
     Ok(ast::FunctionDeclaration {
@@ -274,32 +302,33 @@ impl Parse<tokens::Token> for ast::Statement {
         reason = "Making this smaller does not improve readability."
     )]
     fn parse<'a>(
-        tokens: &ParseInput<'a, tokens::Token>,
+        state: &ParseState<'a, tokens::Token>,
     ) -> Result<'a, Self::ParseResult, tokens::Token> {
-        let original_tokens = tokens.0.get();
-        let types::Located(next, kw_loc) = tokens.next()?;
+        let backup = state.backup();
+
+        let types::Located(next, kw_loc) = state.next()?;
 
         Ok(match next {
             tokens::TokenType::Keyword(tokens::Keyword::Print) => Self::PrintStatement {
                 print_span: *kw_loc,
                 printed_expr: {
-                    let expr = ast::Expr::parse(tokens)?;
-                    tokens.consume(tokens::TokenType::Semi, ";")?;
+                    let expr = ast::Expr::parse(state)?;
+                    state.consume(tokens::TokenType::Semi, ";")?;
                     expr
                 },
             },
             tokens::TokenType::Keyword(tokens::Keyword::If) => Self::IfStatement {
                 condition: {
-                    tokens.consume(tokens::TokenType::LeftParen, "(")?;
-                    let condition = ast::Expr::parse(tokens)?;
-                    tokens.consume(tokens::TokenType::RightParen, ")")?;
+                    state.consume(tokens::TokenType::LeftParen, "(")?;
+                    let condition = ast::Expr::parse(state)?;
+                    state.consume(tokens::TokenType::RightParen, ")")?;
                     condition
                 },
-                then_branch: Box::new(ast::Statement::parse(tokens)?),
-                else_branch: match tokens.peek()?.0 {
+                then_branch: Box::new(ast::Statement::parse(state)?),
+                else_branch: match state.peek()?.0 {
                     tokens::TokenType::Keyword(tokens::Keyword::Else) => {
-                        tokens.advance()?;
-                        Some(Box::new(ast::Statement::parse(tokens)?))
+                        state.advance()?;
+                        Some(Box::new(ast::Statement::parse(state)?))
                     }
                     // TODO EndOfInput would be valid here! And should not advance!
                     _ => None,
@@ -307,15 +336,15 @@ impl Parse<tokens::Token> for ast::Statement {
             },
             tokens::TokenType::Keyword(tokens::Keyword::For) => Self::ForLoop {
                 initializer: {
-                    tokens.consume(tokens::TokenType::LeftParen, "(")?;
-                    match tokens.peek()?.0 {
+                    state.consume(tokens::TokenType::LeftParen, "(")?;
+                    match state.peek()?.0 {
                         tokens::TokenType::Semi => {
-                            tokens.advance()?;
+                            state.advance()?;
                             None
                         }
                         tokens::TokenType::Keyword(tokens::Keyword::Var) => {
-                            tokens.advance()?;
-                            let (id, value) = parse_var_declaration(tokens)?;
+                            state.advance()?;
+                            let (id, value) = parse_var_declaration(state)?;
 
                             Some(ast::ForInitializer::VariableDeclaration {
                                 assignee: id,
@@ -323,47 +352,47 @@ impl Parse<tokens::Token> for ast::Statement {
                             })
                         }
                         _ => {
-                            let expr = ast::Expr::parse(tokens)?;
-                            tokens.consume(tokens::TokenType::Semi, ";")?;
+                            let expr = ast::Expr::parse(state)?;
+                            state.consume(tokens::TokenType::Semi, ";")?;
 
                             Some(ast::ForInitializer::Expression(expr))
                         }
                     }
                 },
-                condition: if let tokens::TokenType::Semi = tokens.peek()?.0 {
-                    tokens.advance()?;
+                condition: if let tokens::TokenType::Semi = state.peek()?.0 {
+                    state.advance()?;
                     None
                 } else {
-                    let expr = ast::Expr::parse(tokens)?;
-                    tokens.consume(tokens::TokenType::Semi, ";")?;
+                    let expr = ast::Expr::parse(state)?;
+                    state.consume(tokens::TokenType::Semi, ";")?;
                     Some(expr)
                 },
-                step: if let tokens::TokenType::RightParen = tokens.peek()?.0 {
-                    tokens.advance()?;
+                step: if let tokens::TokenType::RightParen = state.peek()?.0 {
+                    state.advance()?;
                     None
                 } else {
-                    let expr = ast::Expr::parse(tokens)?;
-                    tokens.consume(tokens::TokenType::RightParen, ")")?;
+                    let expr = ast::Expr::parse(state)?;
+                    state.consume(tokens::TokenType::RightParen, ")")?;
                     Some(expr)
                 },
-                body: Box::new(ast::Statement::parse(tokens)?),
+                body: Box::new(ast::Statement::parse(state)?),
             },
             tokens::TokenType::Keyword(tokens::Keyword::While) => Self::WhileLoop {
                 condition: {
-                    tokens.consume(tokens::TokenType::LeftParen, "(")?;
-                    let condition = ast::Expr::parse(tokens)?;
-                    tokens.consume(tokens::TokenType::RightParen, ")")?;
+                    state.consume(tokens::TokenType::LeftParen, "(")?;
+                    let condition = ast::Expr::parse(state)?;
+                    state.consume(tokens::TokenType::RightParen, ")")?;
                     condition
                 },
-                body: Box::new(ast::Statement::parse(tokens)?),
+                body: Box::new(ast::Statement::parse(state)?),
             },
             tokens::TokenType::Keyword(tokens::Keyword::Return) => Self::ReturnStatement {
-                return_value: if let tokens::TokenType::Semi = tokens.peek()?.0 {
-                    tokens.advance()?;
+                return_value: if let tokens::TokenType::Semi = state.peek()?.0 {
+                    state.advance()?;
                     None
                 } else {
-                    let expr = ast::Expr::parse(tokens)?;
-                    tokens.consume(tokens::TokenType::Semi, ";")?;
+                    let expr = ast::Expr::parse(state)?;
+                    state.consume(tokens::TokenType::Semi, ";")?;
                     Some(expr)
                 },
             },
@@ -371,22 +400,22 @@ impl Parse<tokens::Token> for ast::Statement {
                 body: {
                     let mut body = Vec::new();
                     loop {
-                        match tokens.peek()?.0 {
+                        match state.peek()?.0 {
                             tokens::TokenType::RightBrace => {
-                                tokens.advance()?;
+                                state.advance()?;
                                 break body;
                             }
                             _ => {
-                                body.push(ast::Declaration::parse(tokens)?);
+                                body.push(ast::Declaration::parse(state)?);
                             }
                         }
                     }
                 },
             },
             _ => {
-                tokens.0.set(original_tokens);
-                let expr = ast::Expr::parse(tokens)?;
-                tokens.consume(tokens::TokenType::Semi, ";")?;
+                state.restore(backup);
+                let expr = ast::Expr::parse(state)?;
+                state.consume(tokens::TokenType::Semi, ";")?;
 
                 Self::ExpressionStatement(expr)
             }
@@ -406,17 +435,17 @@ impl Parse<tokens::Token> for ast::Expr {
         reason = "The expect is guaranteed to not fail."
     )]
     fn parse<'a>(
-        tokens: &ParseInput<'a, tokens::Token>,
+        state: &ParseState<'a, tokens::Token>,
     ) -> Result<'a, Self::ParseResult, tokens::Token> {
         fn simple_expr<'a>(
-            tokens: &ParseInput<'a, tokens::Token>,
+            state: &ParseState<'a, tokens::Token>,
         ) -> Result<'a, ast::Expr, tokens::Token> {
-            let raw_next @ types::Located(next, start_span) = tokens.next()?;
+            let raw_next @ types::Located(next, start_span) = state.next()?;
 
             Ok(match next {
                 tokens::TokenType::LeftParen => {
-                    let expr = ast::Expr::parse(tokens)?;
-                    let last_span = tokens.consume(tokens::TokenType::RightParen, ")")?.1;
+                    let expr = ast::Expr::parse(state)?;
+                    let last_span = state.consume(tokens::TokenType::RightParen, ")")?.1;
 
                     ast::Expr::Parenthesized {
                         source_span: types::Span::merge(vec![start_span, &last_span]),
@@ -425,11 +454,11 @@ impl Parse<tokens::Token> for ast::Expr {
                 }
                 tokens::TokenType::Minus => ast::Expr::PrefixExpression {
                     operator: start_span.locate(ast::PrefixOp::Negate),
-                    expr: Box::new(simple_expr(tokens)?),
+                    expr: Box::new(simple_expr(state)?),
                 },
                 tokens::TokenType::Not => ast::Expr::PrefixExpression {
                     operator: start_span.locate(ast::PrefixOp::Not),
-                    expr: Box::new(simple_expr(tokens)?),
+                    expr: Box::new(simple_expr(state)?),
                 },
                 tokens::TokenType::Literal(lit) => {
                     ast::Expr::Literal(start_span.locate(ast::Literal::Raw(lit.clone())))
@@ -457,16 +486,16 @@ impl Parse<tokens::Token> for ast::Expr {
 
         fn continuation<'a>(
             lhs: &mut ast::Expr,
-            tokens: &ParseInput<'a, tokens::Token>,
+            state: &ParseState<'a, tokens::Token>,
         ) -> Result<'a, Option<(types::Located<ast::InfixOp>, ast::Expr)>, tokens::Token> {
-            let mut previous_tokens;
+            let mut backup;
             loop {
-                previous_tokens = tokens.0.get();
+                backup = state.backup();
 
-                let types::Located(next, start_span) = tokens.next()?;
+                let types::Located(next, start_span) = state.next()?;
 
                 let wrap_op =
-                    |op: ast::InfixOp| Ok(Some((start_span.locate(op), simple_expr(tokens)?)));
+                    |op: ast::InfixOp| Ok(Some((start_span.locate(op), simple_expr(state)?)));
 
                 break match next {
                     tokens::TokenType::LeftParen => {
@@ -475,10 +504,10 @@ impl Parse<tokens::Token> for ast::Expr {
                         let last_span;
 
                         loop {
-                            let next = tokens.peek()?;
+                            let next = state.peek()?;
                             match next {
                                 types::Located(tokens::TokenType::RightParen, span) => {
-                                    tokens.advance()?;
+                                    state.advance()?;
                                     last_span = span;
                                     break;
                                 }
@@ -489,13 +518,13 @@ impl Parse<tokens::Token> for ast::Expr {
                                     });
                                 }
                                 types::Located(tokens::TokenType::Comma, _) => {
-                                    tokens.advance()?;
+                                    state.advance()?;
                                 }
                                 _ => {} // any other token will be handled by the next expr check.
                             }
                             first = false;
 
-                            arguments.push(ast::Expr::parse(tokens)?);
+                            arguments.push(ast::Expr::parse(state)?);
                         }
 
                         // Temporary Expression, taking a random location as it is not relevant.
@@ -509,7 +538,7 @@ impl Parse<tokens::Token> for ast::Expr {
                         continue;
                     }
                     tokens::TokenType::Dot => {
-                        let field_name = types::Located::parse(tokens)?;
+                        let field_name = types::Located::parse(state)?;
 
                         // Temporary Expression, taking a random location as it is not relevant.
                         let mut temp_lhs = ast::Expr::Literal(start_span.locate(ast::Literal::Nil));
@@ -532,7 +561,7 @@ impl Parse<tokens::Token> for ast::Expr {
                     tokens::TokenType::LessThanEqual => wrap_op(ast::InfixOp::LessThanEqual),
                     tokens::TokenType::Assign => wrap_op(ast::InfixOp::Assign),
                     _ => {
-                        tokens.0.set(previous_tokens);
+                        state.restore(backup);
                         Ok(None)
                     }
                 };
@@ -599,14 +628,14 @@ impl Parse<tokens::Token> for ast::Expr {
             }
         }
 
-        let mut lhs = simple_expr(tokens)?;
+        let mut lhs = simple_expr(state)?;
 
         // TODO Right now, this allocates the Vec for all continuations,
         // TODO but it would be nice to try if I can do this in a Streaming fashion
         // TODO with a custom iterator instead...
         let mut continuations = Vec::new();
         let mut lhs_ref = &mut lhs;
-        while let Some(cont) = continuation(lhs_ref, tokens)? {
+        while let Some(cont) = continuation(lhs_ref, state)? {
             continuations.push(cont);
 
             lhs_ref = &mut continuations
@@ -637,18 +666,17 @@ impl Parse<tokens::Token> for types::Located<types::Identifier> {
     type ParseResult = Self;
 
     fn parse<'a>(
-        tokens: &ParseInput<'a, tokens::Token>,
+        state: &ParseState<'a, tokens::Token>,
     ) -> Result<'a, Self::ParseResult, tokens::Token> {
-        let next = tokens.next()?;
+        let next = state.next()?;
 
-        Ok(match next.0 {
-            tokens::TokenType::Identifier(ref id) => next.1.locate(id.clone()),
-            _ => {
-                return Err(ParseError::UnexpectedToken {
-                    expected: "identifier",
-                    actual: next,
-                });
-            }
-        })
+        if let tokens::TokenType::Identifier(ref id) = next.0 {
+            Ok(next.1.locate(id.clone()))
+        } else {
+            Err(ParseError::UnexpectedToken {
+                expected: "identifier",
+                actual: next,
+            })
+        }
     }
 }
