@@ -1,11 +1,12 @@
 //! A Lisp-like pretty-printer as it was described in
 //! chapter 5 of Crafting Interpreters.
+
+use super::{Expr, InfixOp, Literal, PrefixOp, Reference};
 use crate::lox::types::{Identifier, Located, RawLiteral};
-use super::{InfixOp, Expr, Literal, PrefixOp};
 
 /// A Lisp-y pretty print as defined by the book in Chapter 5.
 pub trait PrettyPrint {
-    /// Generate a Lisp-y prettyprint.
+    /// Generate a Lisp-y pretty-print.
     /// The default implementation simply calls [`Self::pretty_print_into`]
     /// with a newly allocated String.
     fn pretty_print(&self) -> String {
@@ -67,6 +68,14 @@ impl<T: PrettyPrint + ?Sized> PrettyPrint for Box<T> {
     }
 }
 
+impl PrettyPrint for usize {
+    #[inline(always)]
+    #[expect(clippy::inline_always, reason = "always inlining these is always correct")]
+    fn pretty_print_into(&self, target: &mut String) {
+        *target += &format!("{}", *self);
+    }
+}
+
 impl PrettyPrint for char {
     #[inline(always)]
     #[expect(clippy::inline_always, reason = "always inlining these is always correct")]
@@ -103,7 +112,7 @@ impl PrettyPrint for Expr {
             Expr::Parenthesized { ref expr, .. } => {
                 pp!(target, "(group ", expr, ')');
             }
-            Expr::Identifier(ref id) => pp!(target, id),
+            Expr::Reference(ref reference) => pp!(target, reference),
             Expr::Literal(ref lit) => pp!(target, lit),
             Expr::CallExpression { ref callee, ref arguments, .. } => {
                 pp!(target, "(call ", callee);
@@ -115,6 +124,18 @@ impl PrettyPrint for Expr {
             Expr::PathExpression { ref receiver, ref field_name } => {
                 pp!(target, receiver, '.', field_name);
             }
+        }
+    }
+}
+
+impl PrettyPrint for Reference {
+    #[inline]
+    fn pretty_print_into(&self, target: &mut String) {
+        match *self {
+            Reference::Identifier(ref id) => pp!(target, id),
+            Reference::Resolved { ref name, ref distance, ref index } => 
+                pp!(target, "(ref ", name, ' ', distance, ' ', index),
+            Reference::Global(ref name) => pp!(target, "(global ", name, ")"),
         }
     }
 }

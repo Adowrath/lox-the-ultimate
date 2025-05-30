@@ -287,8 +287,8 @@ impl Parse<tokens::Token> for ast::Declaration {
 
 fn parse_var_declaration<'a>(
     state: &ParseState<'a, tokens::Token>,
-) -> Result<'a, (types::Located<types::Identifier>, Option<ast::Expr>), tokens::Token> {
-    let id = types::Located::parse(state)?;
+) -> Result<'a, (ast::Reference, Option<ast::Expr>), tokens::Token> {
+    let id = ast::Reference::Identifier(types::Located::parse(state)?);
     let value = match state.peek()? {
         types::Located(tokens::TokenType::Semi, _) => None,
         types::Located(tokens::TokenType::Assign, _) => {
@@ -541,7 +541,7 @@ impl Parse<tokens::Token> for ast::Expr {
                     ast::Expr::Literal(start_span.locate(ast::Literal::Raw(lit.clone())))
                 }
                 tokens::TokenType::Identifier(id) => {
-                    ast::Expr::Identifier(start_span.locate(id.clone()))
+                    ast::Expr::Reference(ast::Reference::Identifier(start_span.locate(id.clone())))
                 }
                 tokens::TokenType::Keyword(tokens::Keyword::Nil) => {
                     ast::Expr::Literal(start_span.locate(ast::Literal::Nil))

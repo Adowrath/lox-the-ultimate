@@ -2,12 +2,13 @@ use crate::lox::ast;
 
 #[derive(Debug)]
 pub enum ValidateError {
-    E
+    E,
 }
 
 pub fn validate_program(mut program: ast::Program) -> Result<ast::Program, Vec<ValidateError>> {
     let mut errors = Vec::new();
     program.validate(&mut errors);
+
     if errors.is_empty() {
         Ok(program)
     } else {

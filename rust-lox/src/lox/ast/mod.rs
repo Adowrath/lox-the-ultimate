@@ -26,7 +26,7 @@ pub struct Program {
 #[derive(Debug, PartialEq)]
 pub enum Declaration {
     VariableDeclaration {
-        assignee: l!(Identifier),
+        assignee: Reference,
         value: Option<Expr>,
     },
     ClassDeclaration {
@@ -83,7 +83,7 @@ pub enum Statement {
 #[derive(Debug, PartialEq)]
 pub enum ForInitializer {
     VariableDeclaration {
-        assignee: l!(Identifier),
+        assignee: Reference,
         value: Option<Expr>,
     },
     Expression(Expr),
@@ -121,9 +121,8 @@ pub enum Expr {
         source_span: Span,
         expr: Box<Expr>,
     },
-    /// An identifier
-    Identifier(l!(Identifier)),
-    // TODO: Resolved.
+    /// A reference to another value
+    Reference(Reference),
     /// A literal
     Literal(l!(Literal)),
     /// A Function call: `expr(expr, expr, ...)`
@@ -142,6 +141,21 @@ pub enum Expr {
 }
 
 // Atomic pieces.
+
+#[derive(Debug, PartialEq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "adding a new variant MUST be handled and is a breaking change."
+)]
+pub enum Reference {
+    Identifier(l!(Identifier)),
+    Resolved {
+        name: l!(Identifier),
+        distance: usize,
+        index: usize,
+    },
+    Global(l!(Identifier)),
+}
 
 /// Literals, either a raw literal, or one covered by
 /// keywords (true/false, nil).
@@ -245,7 +259,7 @@ pub enum Precedence {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use super::{Expr, InfixOp, Literal, PrefixOp};
+    use super::{Expr, InfixOp, Literal, PrefixOp, Reference};
     use crate::lox::types::{Located, Location, RawLiteral, Span};
     use std::sync::LazyLock;
 
@@ -278,8 +292,8 @@ pub(crate) mod test {
                     *source_span = EMPTY_SPAN;
                     expr.unlocate();
                 }
-                Expr::Identifier(id) => {
-                    id.unlocate();
+                Expr::Reference(reference) => {
+                    reference.unlocate();
                 }
                 Expr::Literal(lit) => {
                     lit.unlocate();
@@ -299,6 +313,16 @@ pub(crate) mod test {
                     receiver.unlocate();
                     field_name.unlocate();
                 }
+            }
+        }
+    }
+
+    impl Unlocate for Reference {
+        fn unlocate(&mut self) {
+            match self {
+                Reference::Identifier(id) => id.unlocate(),
+                Reference::Resolved { name, .. } => name.unlocate(),
+                Reference::Global(name) => name.unlocate(),
             }
         }
     }

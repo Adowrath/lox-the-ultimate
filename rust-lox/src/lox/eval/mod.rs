@@ -135,7 +135,7 @@ impl Evaluate for ForInitializer {
 impl Evaluate for Expr {
     fn evaluate(&self, evaluator: &mut Evaluator) -> LoxValue {
         match self {
-            Expr::Identifier(_) => todo!("Identifier"),
+            Expr::Reference(_) => todo!("Identifier"),
             Expr::CallExpression { .. } => todo!("CallExpression"),
             Expr::PathExpression { .. } => todo!("PathExpression"),
             Expr::PrefixExpression { operator, expr } => {
