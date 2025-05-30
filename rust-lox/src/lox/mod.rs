@@ -11,3 +11,5 @@ mod util;
 // Specific Phases
 pub mod token;
 pub mod parser;
+pub mod validate;
+pub mod eval;

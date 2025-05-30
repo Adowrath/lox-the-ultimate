@@ -63,6 +63,7 @@ impl From<EngineError> for ExitCode {
             // should be presented as 74, EX_IOERR
             EngineError::FileError(_) => 66,    // EX_NOINPUT
             EngineError::LexingErrors(_) => 65, // EX_DATAERR
+            // Runtime Error has 70
         })
     }
 }

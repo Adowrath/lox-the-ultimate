@@ -217,10 +217,11 @@ use lox::errors::EngineError;
 use lox::token::lexer;
 
 use crate::lox::parser::imperative::Parse;
-use crate::lox::{ast, parser};
+use crate::lox::{ast, parser, validate};
 use std::fs;
 use std::io::{Error as IOError, Write};
 use std::process::{ExitCode, Termination};
+use crate::lox::eval::Evaluator;
 
 fn process_source(source: &str) -> Result<ast::Program, EngineError> {
     let tokens = lexer::tokenize(source).map_err(EngineError::LexingErrors)?;
@@ -239,6 +240,7 @@ fn process_source(source: &str) -> Result<ast::Program, EngineError> {
     // TODO ParseErrors need to be modified so they can be returned out, outliving the tokens lifetime.
 
     let program = parse_result.expect("Parse error");
+    let program = validate::validate_program(program).expect("Validation error");
     // validate
     Ok(program)
 }
@@ -258,6 +260,8 @@ fn run_file(file: String, _std_conformant: bool) -> Result<(), EngineError> {
 /// TODO: Add command support (mainly :quit)
 fn run_prompt(_std_conformant: bool) -> Result<(), IOError> {
     use std::io::{stdin, stdout};
+    
+    let mut evaluator = Evaluator::default();
 
     let mut line = String::new();
     let stdin = stdin();
@@ -268,8 +272,10 @@ fn run_prompt(_std_conformant: bool) -> Result<(), IOError> {
         line.clear();
         let _: usize = stdin.read_line(&mut line)?;
 
-        let program = process_source(&line);
-        println!("Program: {program:?}");
+        let program = process_source(&line).expect("Error processing source");
+        
+        let result = evaluator.evaluate(program);
+        println!("{result}");
     }
 }
 
