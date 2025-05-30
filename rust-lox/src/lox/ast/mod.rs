@@ -261,19 +261,22 @@ pub enum Precedence {
 #[cfg(test)]
 pub(crate) mod test {
     use super::{Expr, InfixOp, Literal, PrefixOp, Reference};
-    use crate::lox::types::{Located, Location, RawLiteral, Span};
+    use crate::lox::types::{Located, RawLiteral, Span};
     use std::sync::LazyLock;
-
-    pub const EMPTY_SPAN: Span =
-        Span::from(Location { col: 0, line: 0 }, Location { col: 0, line: 0 });
 
     pub trait Unlocate {
         fn unlocate(&mut self);
     }
 
+    impl Unlocate for Span {
+        fn unlocate(&mut self) {
+            *self = Span::Empty;
+        }
+    }
+
     impl<T> Unlocate for Located<T> {
         fn unlocate(&mut self) {
-            self.1 = EMPTY_SPAN;
+            self.1.unlocate();
         }
     }
 
@@ -290,7 +293,7 @@ pub(crate) mod test {
                     rhs.unlocate();
                 }
                 Expr::Parenthesized { source_span, expr } => {
-                    *source_span = EMPTY_SPAN;
+                    source_span.unlocate();
                     expr.unlocate();
                 }
                 Expr::Reference(reference) => {
@@ -303,7 +306,7 @@ pub(crate) mod test {
                     /*source_span, */ callee,
                     arguments,
                 } => {
-                    // *source_span = EMPTY_SPAN;
+                    // source_span.unlocate();
                     callee.unlocate();
                     arguments.iter_mut().for_each(Expr::unlocate);
                 }
@@ -329,15 +332,15 @@ pub(crate) mod test {
     }
 
     pub static EXPR_EXAMPLE: LazyLock<Expr> = LazyLock::new(|| Expr::InfixOperation {
-        operator: Located(InfixOp::Multiply, EMPTY_SPAN),
+        operator: Located(InfixOp::Multiply, Span::Empty),
         lhs: Box::new(Expr::PrefixExpression {
-            operator: Located(PrefixOp::Negate, EMPTY_SPAN),
+            operator: Located(PrefixOp::Negate, Span::Empty),
             expr: Box::new(Expr::Literal(Located(
                 Literal::Raw(RawLiteral::Number {
                     raw: "123".to_owned(),
                     value: 123f64,
                 }),
-                EMPTY_SPAN,
+                Span::Empty,
             ))),
         }),
         rhs: Box::new(Expr::Parenthesized {
@@ -346,9 +349,9 @@ pub(crate) mod test {
                     raw: "45.67".to_owned(),
                     value: 45.67f64,
                 }),
-                EMPTY_SPAN,
+                Span::Empty,
             ))),
-            source_span: EMPTY_SPAN,
+            source_span: Span::Empty,
         }),
     });
 }

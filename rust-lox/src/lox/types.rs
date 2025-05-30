@@ -1,7 +1,7 @@
 //! Types used through multiple phases of the Lox project, mostly
 //! in an auxiliary fashion to support (better) error reporting.
 
-use core::cmp::{max, min, Ordering};
+use core::cmp::{Ordering, max, min};
 use core::fmt::{Display, Formatter};
 
 /// A Location simply consists of a line and column position.
@@ -39,58 +39,69 @@ impl Display for Location {
 /// Both positions are to be treated as inclusive.
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[non_exhaustive] // Filename might be added.
-pub struct Span {
-    /// Start of the Span
-    pub start: Location,
-    /// End of the Span
-    pub end: Location,
+pub enum Span {
+    Empty,
+    Actual {
+        /// Start of the Span
+        start: Location,
+        /// End of the Span
+        end: Location,
+    },
 }
 
 impl Span {
     /// Construct a source span from given start and end positions
     #[must_use]
     pub const fn from(start: Location, end: Location) -> Self {
-        Span { start, end }
+        Span::Actual { start, end }
     }
-    
+
     /// Construct a Located value from this Span.
     #[must_use]
     pub const fn locate<T>(self, value: T) -> Located<T> {
         Located(value, self)
     }
 
-    /// Merges the given iterable of Spans. The iterable must NOT be empty!
-    ///
-    /// # Panics
-    ///
-    /// If the given iterable was empty (so that we do not need to represent
-    /// invalid spans).
-    /// TODO: Maybe implement invalid spans.
+    /// Merges the given iterable of Spans. Returns an empty span if the iterable
+    /// is empty, or all inner Spans are empty themselves.
     #[must_use]
     pub fn merge<'a, I: IntoIterator<Item = &'a Span>>(spans: I) -> Span {
-        let mut spans = spans.into_iter();
+        let mut full_span = Span::Empty;
 
-        #[expect(clippy::panic, reason = "explicitly warned in docs")]
-        let Some(first) = spans.next() else {
-            panic!("Span::merge was called with empty iterator.");
-        };
-
-        spans.fold(*first,
-            |mut acc, next| {
-                acc.start = min(acc.start, next.start);
-                acc.end = max(acc.end, next.end);
-                acc
+        for &span in spans {
+            match full_span {
+                Span::Empty => full_span = span,
+                Span::Actual {
+                    ref mut start,
+                    ref mut end,
+                } => match span {
+                    Span::Empty => {}
+                    Span::Actual {
+                        start: next_start,
+                        end: next_end,
+                    } => {
+                        *start = min(*start, next_start);
+                        *end = max(*end, next_end);
+                    }
+                },
             }
-        )
+        }
+
+        full_span
     }
 }
 
 impl Display for Span {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        if self.start == self.end {
-            write!(f, "{}", self.start)
-        } else {
-            write!(f, "{}-{}", self.start, self.end)
+        match self {
+            Span::Empty => write!(f, "empty span"),
+            Span::Actual { start, end } => {
+                if start == end {
+                    write!(f, "{}", start)
+                } else {
+                    write!(f, "{}-{}", start, end)
+                }
+            }
         }
     }
 }
@@ -102,10 +113,10 @@ pub struct Located<T>(pub T, pub Span);
 
 /// This instance is for making comparisons between located
 /// values and the underlying types easier.
-/// 
+///
 /// This notably *ignores* the Location information! Thus, no
 /// implementation in the other direction can be provided, as
-/// this would otherwise violate the transitivity rule. 
+/// this would otherwise violate the transitivity rule.
 impl<T: PartialEq> PartialEq<T> for Located<T> {
     fn eq(&self, other: &T) -> bool {
         self.0 == *other
@@ -114,7 +125,10 @@ impl<T: PartialEq> PartialEq<T> for Located<T> {
 
 impl<T> Located<T> {
     #[must_use]
-    pub fn map<U, F>(&self, f: F) -> Located<U> where F: FnOnce(&T) -> U {
+    pub fn map<U, F>(&self, f: F) -> Located<U>
+    where
+        F: FnOnce(&T) -> U,
+    {
         Located(f(&self.0), self.1)
     }
 }
