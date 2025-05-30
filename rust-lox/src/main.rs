@@ -64,25 +64,20 @@
 //!   useful restriction to challenge and foster learning.
 //!
 //! [^1]: <https://craftinginterpreters.com/>
-#![deny(
-    warnings,
-)]
+#![deny(warnings)]
 #![deny(
     future_incompatible,
     keyword_idents,
     let_underscore,
     nonstandard_style,
-    refining_impl_trait,
+    refining_impl_trait
 )]
 #![deny(
     rust_2018_compatibility,
     rust_2021_compatibility,
-    rust_2024_compatibility,
+    rust_2024_compatibility
 )]
-#![deny(
-    clippy::all,
-    clippy::pedantic,
-)]
+#![deny(clippy::all, clippy::pedantic)]
 #![deny(
     clippy::absolute_paths,
     clippy::alloc_instead_of_core,
@@ -207,7 +202,9 @@
 
 // Sanity check for Nightly features.
 #[cfg(all(feature = "nightly", not(nightly)))]
-compile_error!("nightly feature cannot be used without a nightly toolchain (detected by rustversion)");
+compile_error!(
+    "nightly feature cannot be used without a nightly toolchain (detected by rustversion)"
+);
 
 extern crate alloc;
 
@@ -219,22 +216,41 @@ use clap::{Parser, Subcommand};
 use lox::errors::EngineError;
 use lox::token::lexer;
 
+use crate::lox::parser::imperative::Parse;
+use crate::lox::{ast, parser};
 use std::fs;
 use std::io::{Error as IOError, Write};
 use std::process::{ExitCode, Termination};
-use crate::lox::{ast, parser};
-use crate::lox::parser::imperative::Parse;
+
+fn process_source(source: &str) -> Result<ast::Program, EngineError> {
+    let tokens = lexer::tokenize(source).map_err(EngineError::LexingErrors)?;
+
+    let parse_result = {
+        let parser_state = parser::imperative::ParseState::new(&tokens);
+        let result = ast::Program::parse(&parser_state);
+        match result {
+            Ok(program) => Ok(program),
+            Err(err) => {
+                parser_state.errors.borrow_mut().push(err);
+                Err(parser_state.errors.into_inner())
+            }
+        }
+    };
+    // TODO ParseErrors need to be modified so they can be returned out, outliving the tokens lifetime.
+
+    let program = parse_result.expect("Parse error");
+    // validate
+    Ok(program)
+}
 
 /// Load a file and run it through the interpreter.
-/// TODO: Currently, only lexes. Still needs to Parse and Validate.
+/// TODO: Currently, only lexes and parses. Still needs to Validate.
 /// TODO: Configure VM/X86 backend?
 fn run_file(file: String, _std_conformant: bool) -> Result<(), EngineError> {
     let source = fs::read_to_string(file)?;
-    let tokens = lexer::tokenize(source)
-        .map_err(EngineError::LexingErrors)?;
 
-    let result = ast::Program::parse(&parser::imperative::ParseState::new(&tokens));
-    println!("Parse result: {result:?}");
+    let program = process_source(&source)?;
+    println!("Program: {program:?}");
     Ok(())
 }
 
@@ -252,12 +268,8 @@ fn run_prompt(_std_conformant: bool) -> Result<(), IOError> {
         line.clear();
         let _: usize = stdin.read_line(&mut line)?;
 
-        let tokens = lexer::tokenize(&line);
-
-        if let Ok(tokens) = tokens {
-            let result = ast::Program::parse(&parser::imperative::ParseState::new(&tokens));
-            println!("Parse result: {result:?}");
-        }
+        let program = process_source(&line);
+        println!("Program: {program:?}");
     }
 }
 
@@ -337,21 +349,24 @@ enum LoxCommands {
     },
 }
 
-#[expect(clippy::unreachable, reason = "Unreachability is a guarantee by Clap's rules")]
+#[expect(
+    clippy::unreachable,
+    reason = "Unreachability is a guarantee by Clap's rules"
+)]
 fn main() -> EngineResult {
     let LoxArgs {
         std_conformant,
         command,
-        source_file
+        source_file,
     } = LoxArgs::parse();
 
     match (command, source_file) {
-        (None, Some(source_file))
-        | (Some(LoxCommands::Tokenize { source_file }), None) => run_file(source_file, std_conformant).into(),
+        (None, Some(source_file)) | (Some(LoxCommands::Tokenize { source_file }), None) => {
+            run_file(source_file, std_conformant).into()
+        }
 
         (Some(LoxCommands::Repl), None) => run_prompt(std_conformant).into(),
 
-        (Some(_), Some(_))
-        | (None, None) => unreachable!("clap verifies this cannot happen."),
+        (Some(_), Some(_)) | (None, None) => unreachable!("clap verifies this cannot happen."),
     }
 }

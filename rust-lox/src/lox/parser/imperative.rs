@@ -23,7 +23,7 @@ use crate::lox::types;
 
 pub struct ParseState<'a, Token> {
     input: core::cell::Cell<&'a [Token]>,
-    errors: core::cell::RefCell<Vec<ParseError<'a, Token>>>,
+    pub errors: core::cell::RefCell<Vec<ParseError<'a, Token>>>,
 }
 
 pub struct ParseStateBackup<'a, Token> {
@@ -130,6 +130,27 @@ impl<'a, Token> ParseState<'a, Token> {
         self.input.set(rest);
         Ok(())
     }
+
+    /// # Errors
+    ///
+    /// Returns the error of the recovery function, or the original
+    /// error if it cannot be recovered from.
+    #[inline]
+    pub fn recover_with<T, F, G>(&self, parser: F, recovery: G) -> Result<'a, T, Token>
+    where
+        F: FnOnce() -> Result<'a, T, Token>,
+        G: FnOnce() -> Result<'a, T, Token>,
+    {
+        match parser() {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let result = recovery();
+                // maybe attach inner error if recovery fails idk??
+                self.errors.borrow_mut().push(err);
+                result
+            }
+        }
+    }
 }
 
 pub trait Parse<Token>: Sized {
@@ -173,17 +194,58 @@ impl Parse<tokens::Token> for ast::Declaration {
 
         let types::Located(next, start_span) = state.next()?;
 
-        Ok(match next {
+        match next {
             tokens::TokenType::Keyword(tokens::Keyword::Var) => {
-                let (id, value) = parse_var_declaration(state)?;
+                state.recover_with(
+                    || {
+                        let (id, value) = parse_var_declaration(state)?;
 
-                Self::VariableDeclaration {
-                    assignee: id,
-                    value,
-                }
+                        Ok(Self::VariableDeclaration {
+                            assignee: id,
+                            value,
+                        })
+                    },
+                    || {
+                        // Recovery means: Wait until next ; or }. Consume only the ;
+                        loop {
+                            match state.peek()?.0 {
+                                tokens::TokenType::Semi => {
+                                    state.advance()?;
+                                    break;
+                                }
+                                tokens::TokenType::RightBrace => {
+                                    // do not consume - wrapping code needs to handle this.
+                                    break;
+                                }
+                                _ => state.advance()?,
+                            }
+                        }
+
+                        Ok(Self::Statement(ast::Statement::ExpressionStatement(
+                            ast::Expr::Literal(types::Located(ast::Literal::Nil, *start_span)),
+                        )))
+                    },
+                )
             }
-            tokens::TokenType::Keyword(tokens::Keyword::Class) => Self::ClassDeclaration {
-                name: types::Located::parse(state)?,
+            tokens::TokenType::Keyword(tokens::Keyword::Class) => Ok(Self::ClassDeclaration {
+                name: state.recover_with(
+                    || types::Located::parse(state),
+                    || {
+                        // Recovery = Skip until {
+                        loop {
+                            let next = state.next()?;
+                            match next.0 {
+                                tokens::TokenType::LeftBrace => {
+                                    break Ok(types::Located(
+                                        types::Identifier("<invalid>".to_string()),
+                                        next.1,
+                                    ));
+                                }
+                                _ => state.advance()?,
+                            }
+                        }
+                    },
+                )?,
                 funcs: {
                     state.consume(tokens::TokenType::LeftBrace, "{")?;
                     let mut funcs = Vec::new();
@@ -201,6 +263,8 @@ impl Parse<tokens::Token> for ast::Declaration {
                                 )?);
                             }
                             _ => {
+                                // TODO Better Recovery: Skip unknown token(s) until either Function or } is found, push error to error list.
+                                // Left Paren that might indicate missing name.
                                 return Err(ParseError::UnexpectedToken {
                                     expected: "method declaration or closing }",
                                     actual: next,
@@ -209,15 +273,15 @@ impl Parse<tokens::Token> for ast::Declaration {
                         }
                     }
                 },
-            },
-            tokens::TokenType::Keyword(tokens::Keyword::Fun) => Self::FunctionDeclaration(
+            }),
+            tokens::TokenType::Keyword(tokens::Keyword::Fun) => Ok(Self::FunctionDeclaration(
                 parse_function_parts(*start_span, types::Located::parse(state)?, state)?,
-            ),
+            )),
             _ => {
                 state.restore(backup);
-                Self::Statement(ast::Statement::parse(state)?)
+                Ok(Self::Statement(ast::Statement::parse(state)?))
             }
-        })
+        }
     }
 }
 
@@ -238,6 +302,12 @@ fn parse_var_declaration<'a>(
             });
         }
     };
+    if let tokens::TokenType::Comma = state.peek()?.0 {
+        state.advance()?;
+        return Err(ParseError::GenericError {
+            message: "Lox does not support declaring multiple variables at once!".to_string(),
+        });
+    }
     state.consume(tokens::TokenType::Semi, ";")?;
 
     Ok((id, value))
@@ -248,6 +318,7 @@ fn parse_function_parts<'a>(
     name: types::Located<types::Identifier>,
     state: &ParseState<'a, tokens::Token>,
 ) -> Result<'a, ast::FunctionDeclaration, tokens::Token> {
+    // TODO Recovery.
     state.consume(tokens::TokenType::LeftParen, "(")?;
 
     let mut first = true;
@@ -308,6 +379,10 @@ impl Parse<tokens::Token> for ast::Statement {
 
         let types::Located(next, kw_loc) = state.next()?;
 
+        // TODO: Recovery.
+        // Issue: Block Statement can't recover usefully unless Declarations
+        // are all recovering - otherwise, an inner if's closing } will be taken
+        // as the block's }.
         Ok(match next {
             tokens::TokenType::Keyword(tokens::Keyword::Print) => Self::PrintStatement {
                 print_span: *kw_loc,
@@ -426,6 +501,8 @@ impl Parse<tokens::Token> for ast::Statement {
 impl Parse<tokens::Token> for ast::Expr {
     type ParseResult = Self;
 
+    // TODO: Recovery
+    // PROBLEM: Complicated
     #[expect(
         clippy::too_many_lines,
         reason = "Making this smaller does not improve readability."
