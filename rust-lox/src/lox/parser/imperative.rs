@@ -229,17 +229,17 @@ impl Parse<tokens::Token> for ast::Declaration {
             }
             tokens::TokenType::Keyword(tokens::Keyword::Class) => Ok(Self::ClassDeclaration {
                 name: state.recover_with(
-                    || types::Located::parse(state),
+                    || Ok(ast::Reference::Identifier(types::Located::parse(state)?)),
                     || {
                         // Recovery = Skip until {
                         loop {
                             let next = state.next()?;
                             match next.0 {
                                 tokens::TokenType::LeftBrace => {
-                                    break Ok(types::Located(
+                                    break Ok(ast::Reference::Identifier(types::Located(
                                         types::Identifier("<invalid>".to_string()),
                                         next.1,
-                                    ));
+                                    )));
                                 }
                                 _ => state.advance()?,
                             }
@@ -342,7 +342,7 @@ fn parse_function_parts<'a>(
             }
             first = false;
 
-            parameters.push(types::Located::parse(state)?);
+            parameters.push(ast::Reference::Identifier(types::Located::parse(state)?));
         }
     };
     state.consume(tokens::TokenType::LeftBrace, "{")?;
@@ -359,7 +359,7 @@ fn parse_function_parts<'a>(
 
     Ok(ast::FunctionDeclaration {
         span: types::Span::merge(&vec![start_span, *last_span]),
-        name,
+        name: ast::Reference::Identifier(name),
         parameters,
         body,
     })

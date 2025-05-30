@@ -96,7 +96,7 @@ impl Display for Span {
 }
 
 /// A Located value pairs a value with a source span.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[expect(clippy::exhaustive_structs, reason = "this is set in stone")]
 pub struct Located<T>(pub T, pub Span);
 

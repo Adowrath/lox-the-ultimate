@@ -30,7 +30,7 @@ pub enum Declaration {
         value: Option<Expr>,
     },
     ClassDeclaration {
-        name: l!(Identifier),
+        name: Reference,
         funcs: Vec<FunctionDeclaration>,
     },
     FunctionDeclaration(FunctionDeclaration),
@@ -40,8 +40,8 @@ pub enum Declaration {
 #[derive(Debug, PartialEq)]
 pub struct FunctionDeclaration {
     pub span: Span,
-    pub name: l!(Identifier),
-    pub parameters: Vec<l!(Identifier)>,
+    pub name: Reference,
+    pub parameters: Vec<Reference>,
     pub body: Vec<Declaration>,
 }
 
@@ -101,6 +101,7 @@ pub enum ForInitializer {
     reason = "adding a new variant MUST be handled and is a breaking change."
 )]
 pub enum Expr {
+    // TODO Closure
     /// Application of a prefix operator.
     PrefixExpression {
         operator: l!(PrefixOp),
