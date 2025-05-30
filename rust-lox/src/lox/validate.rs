@@ -1,15 +1,27 @@
 use crate::lox::ast::{
     Declaration, Expr, ForInitializer, FunctionDeclaration, Program, Reference, Statement,
 };
-use crate::lox::types::{Identifier, Located};
+use crate::lox::types::{Identifier, Located, Span};
+use itertools::Itertools;
 
 #[derive(Debug)]
 pub enum ValidateError {
-    E,
+    Internal(String),
+    Invalid(&'static str, Span),
+    UnknownReference(Located<Identifier>),
+    EarlyReference(Located<Identifier>),
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Context {
+    Global,
+    Initializer { subclass: bool },
+    Function { method: bool, subclass: bool },
 }
 
 pub struct ValidationState {
-    scopes: Vec<Vec<Identifier>>,
+    scopes: Vec<Vec<(Identifier, bool)>>,
+    contexts: Vec<Context>,
     errors: Vec<ValidateError>,
 }
 
@@ -17,53 +29,101 @@ impl ValidationState {
     pub fn new() -> Self {
         Self {
             scopes: Vec::new(),
+            contexts: Vec::new(),
             errors: Vec::new(),
         }
     }
 
-    pub fn in_scope<F, T>(&mut self, f: F) -> T
-    where
-        F: FnOnce(&mut Self) -> T,
-    {
-        self.scopes.push(Vec::new());
-        let res = f(self);
-        self.scopes.pop();
-        res
+    #[inline]
+    pub fn report(&mut self, err: ValidateError) {
+        self.errors.push(err);
     }
 
-    /// Declare a new identifier in the current scope, returning an updated Reference to it.
+    #[inline]
+    pub fn active_context(&self) -> Context {
+        *self.contexts.last().unwrap_or(&Context::Global)
+    }
+
+    #[inline]
+    pub fn in_scope<F>(&mut self, f: F) -> usize
+    where
+        F: FnOnce(&mut Self),
+    {
+        self.scopes.push(Vec::new());
+        f(self);
+        self.scopes.pop().expect("we pushed").len()
+    }
+
+    #[inline]
+    pub fn in_context<F>(&mut self, context: Context, f: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        self.contexts.push(context);
+        f(self);
+        self.contexts.pop();
+    }
+
+    #[inline]
+    /// Declare a new identifier in the current scope, returning an
+    /// updated [`Reference`] to it.
     pub fn declare(&mut self, reference: &mut Reference) {
+        self.declaring(reference, |_| ())
+    }
+
+    #[inline]
+    /// Declare a new identifier in the current scope, separating declaration
+    /// and definition phase split up by the callback.
+    pub fn declaring<F>(&mut self, reference: &mut Reference, func: F)
+    where
+        F: FnOnce(&mut Self),
+    {
         if let Reference::Identifier(id) = reference {
-            *reference = match self.scopes.last_mut() {
-                None => Reference::Global(id.clone()),
-                Some(scope) => {
-                    scope.push(id.0.clone());
-                    Reference::Resolved {
-                        name: id.clone(),
-                        distance: 0,
-                        index: scope.len() - 1,
-                    }
-                }
+            if self.scopes.is_empty() {
+                func(self);
+                *reference = Reference::Global(id.clone());
+                return;
             }
+
+            self.scopes.last_mut().unwrap().push((id.0.clone(), false));
+            func(self);
+
+            let scope = self.scopes.last_mut().unwrap();
+            scope.last_mut().expect("We just pushed").1 = true;
+
+            *reference = Reference::Resolved {
+                name: id.clone(),
+                distance: 0,
+                index: scope.len() - 1,
+            };
         } else {
-            // Already resolved, no need to do anything.
+            func(self)
         }
     }
 
+    #[inline]
     /// Lookup and resolve an identifier to a reference
-    pub fn resolve(&self, id: Located<Identifier>) -> Reference {
+    pub fn resolve(&mut self, id: Located<Identifier>) -> Reference {
         let mut dist = 0;
         for scope in self.scopes.iter().rev() {
-            match scope.iter().position(|binding| binding == &id.0) {
+            match scope.iter().find_position(|binding| binding.0 == id.0) {
                 None => dist += 1,
-                Some(idx) => {
+                Some((idx, (_, true))) => {
                     return Reference::Resolved {
                         name: id.clone(),
                         distance: dist,
                         index: idx,
                     };
                 }
+                _ => {
+                    self.report(ValidateError::EarlyReference(id.clone()));
+                    break;
+                }
             }
+        }
+        // We only error out if we are at the top-level
+        if self.scopes.is_empty() {
+            self.report(ValidateError::UnknownReference(id.clone()));
         }
         Reference::Global(id)
     }
@@ -112,18 +172,78 @@ impl Validate for Declaration {
     fn validate(&mut self, state: &mut ValidationState) {
         match self {
             Declaration::VariableDeclaration { assignee, value } => {
-                if let Some(value) = value {
-                    value.validate(state);
-                }
-                state.declare(assignee);
+                state.declaring(assignee, |state| {
+                    if let Some(value) = value {
+                        value.validate(state);
+                    }
+                });
             }
             Declaration::ClassDeclaration { name, funcs } => {
                 state.declare(name);
-                for func_decl in funcs {
-                    func_decl.validate(state);
+
+                let subclass = false;
+                let define_methods = |state: &mut ValidationState| {
+                    state.in_scope(|state| {
+                        state.declare(&mut Reference::Identifier(Located(
+                            Identifier("this".to_owned()),
+                            Span::Empty,
+                        )));
+
+                        for func_decl in funcs {
+                            let func_name = match func_decl.name {
+                                Reference::Identifier(ref id) => id,
+                                Reference::Resolved { ref name, .. } => name,
+                                Reference::Global(ref name) => name,
+                            };
+                            let ctx = if func_name.0 == Identifier("init".to_owned()) {
+                                Context::Initializer { subclass }
+                            } else {
+                                Context::Function {
+                                    method: true,
+                                    subclass,
+                                }
+                            };
+
+                            state.in_context(ctx, |state| {
+                                func_decl.validate(state);
+                            });
+                        }
+                    })
+                };
+
+                // if subclass scope for super
+                if subclass {
+                    state.in_scope(|state| {
+                        state.declare(&mut Reference::Identifier(Located(
+                            Identifier("super".to_owned()),
+                            Span::Empty,
+                        )));
+
+                        define_methods(state);
+                    });
+                } else {
+                    define_methods(state);
                 }
             }
-            Declaration::FunctionDeclaration(func_decl) => func_decl.validate(state),
+            Declaration::FunctionDeclaration(func_decl) => {
+                state.declare(&mut func_decl.name);
+
+                let ctx = match state.active_context() {
+                    Context::Function { method, subclass } => {
+                        Context::Function { method, subclass }
+                    }
+                    Context::Initializer { subclass } => Context::Function {
+                        method: true,
+                        subclass,
+                    },
+                    Context::Global => Context::Function {
+                        method: false,
+                        subclass: false,
+                    },
+                };
+
+                state.in_context(ctx, |state| func_decl.validate(state))
+            }
             Declaration::Statement(stmt) => stmt.validate(state),
         }
     }
@@ -132,20 +252,16 @@ impl Validate for Declaration {
 impl Validate for FunctionDeclaration {
     fn validate(&mut self, state: &mut ValidationState) {
         let FunctionDeclaration {
-            name,
-            parameters,
-            body,
-            ..
+            parameters, body, ..
         } = self;
-        state.declare(name);
-        state.in_scope(|state| {
+        let _ = state.in_scope(|state| {
             for parameter in parameters {
                 state.declare(parameter);
             }
             for decl in body {
                 decl.validate(state);
             }
-        })
+        });
     }
 }
 
@@ -169,25 +285,48 @@ impl Validate for Statement {
                 condition,
                 step,
                 body,
-            } => state.in_scope(|state| {
-                initializer.validate(state);
-                condition.validate(state);
-                step.validate(state);
-                body.validate(state);
-            }),
+            } => {
+                let _ = state.in_scope(|state| {
+                    initializer.validate(state);
+                    condition.validate(state);
+                    step.validate(state);
+                    body.validate(state);
+                });
+            }
 
-            Statement::WhileLoop { condition, body } => state.in_scope(|state| {
-                condition.validate(state);
-                body.validate(state);
-            }),
+            Statement::WhileLoop { condition, body } => {
+                let _ = state.in_scope(|state| {
+                    condition.validate(state);
+                    body.validate(state);
+                });
+            }
 
-            Statement::BlockStatement { body } => state.in_scope(|state| {
-                for decl in body {
-                    decl.validate(state);
+            Statement::BlockStatement { body } => {
+                let _ = state.in_scope(|state| {
+                    for decl in body {
+                        decl.validate(state);
+                    }
+                });
+            }
+
+            Statement::ReturnStatement { return_value } => {
+                match state.active_context() {
+                    Context::Global => state.report(ValidateError::Invalid(
+                        "Cannot return a value from an initializer",
+                        Span::Empty, // TODO Span of entire thing
+                    )),
+                    Context::Initializer { .. } => {
+                        if let Some(_return_value) = return_value {
+                            state.report(ValidateError::Invalid(
+                                "Cannot return a value from an initializer",
+                                Span::Empty,
+                            ))
+                        }
+                    }
+                    Context::Function { .. } => {}
                 }
-            }),
-
-            Statement::ReturnStatement { return_value } => return_value.validate(state),
+                return_value.validate(state)
+            }
             Statement::PrintStatement { printed_expr, .. } => printed_expr.validate(state),
         }
     }
@@ -233,7 +372,9 @@ impl Validate for Reference {
     fn validate(&mut self, state: &mut ValidationState) {
         match self {
             Reference::Identifier(id) => *self = state.resolve(id.clone()),
-            _ => panic!("Reference already resolved during validation: {self:?}"),
+            _ => state.report(ValidateError::Internal(format!(
+                "Reference already resolved during validation, this should not happen {self:?}"
+            ))),
         }
     }
 }
