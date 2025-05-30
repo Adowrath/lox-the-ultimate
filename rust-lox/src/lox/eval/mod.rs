@@ -1,6 +1,8 @@
 mod lox_types;
 
-use crate::lox::ast::{Declaration, Expr, InfixOp, Literal, PrefixOp, Program, Statement};
+use crate::lox::ast::{
+    Declaration, Expr, ForInitializer, InfixOp, Literal, PrefixOp, Program, Statement,
+};
 use crate::lox::eval::lox_types::LoxValue;
 use crate::lox::types;
 use crate::lox::types::RawLiteral;
@@ -17,7 +19,7 @@ impl Evaluator {
     }
 }
 
-// TODO Split Evaluate and EvaluateValue; most evaluations don't return anything.
+// TODO Split Execute and Evaluate; only evaluations have a value. Find way to print result of single "2+3;" statement anyway, though, when on the REPL.
 trait Evaluate {
     fn evaluate(&self, evaluator: &mut Evaluator) -> LoxValue;
 }
@@ -53,12 +55,79 @@ impl Evaluate for Statement {
     fn evaluate(&self, evaluator: &mut Evaluator) -> LoxValue {
         match self {
             Statement::ExpressionStatement(expr) => expr.evaluate(evaluator),
-            Statement::IfStatement { .. } => todo!("IfStatement"),
-            Statement::ForLoop { .. } => todo!("ForLoop"),
-            Statement::WhileLoop { .. } => todo!("WhileLoop"),
-            Statement::BlockStatement { .. } => todo!("BlockStatement"),
+            Statement::IfStatement {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                if condition.evaluate(evaluator).is_truthy() {
+                    then_branch.evaluate(evaluator)
+                } else if let Some(else_branch) = else_branch {
+                    else_branch.evaluate(evaluator)
+                } else {
+                    LoxValue::Nil
+                }
+            }
+            Statement::ForLoop {
+                initializer,
+                condition,
+                step,
+                body,
+            } => {
+                if let Some(initializer) = initializer {
+                    initializer.evaluate(evaluator);
+                }
+                loop {
+                    if let Some(condition) = condition {
+                        if !condition.evaluate(evaluator).is_truthy() {
+                            break;
+                        }
+
+                        body.evaluate(evaluator);
+
+                        if let Some(step) = step {
+                            step.evaluate(evaluator);
+                        }
+                    }
+                }
+                LoxValue::Nil
+            }
+            Statement::WhileLoop { condition, body } => {
+                loop {
+                    if condition.evaluate(evaluator).is_truthy() {
+                        break;
+                    }
+                    body.evaluate(evaluator);
+                }
+                LoxValue::Nil
+            }
+            Statement::BlockStatement { body } => {
+                for decl in body {
+                    decl.evaluate(evaluator);
+                }
+                LoxValue::Nil
+            }
             Statement::ReturnStatement { .. } => todo!("ReturnStatement"),
-            Statement::PrintStatement { .. } => todo!("PrintStatement"),
+            Statement::PrintStatement { printed_expr, .. } => {
+                let expr = printed_expr.evaluate(evaluator);
+                println!("{}", expr);
+                LoxValue::Nil
+            }
+        }
+    }
+}
+
+impl Evaluate for ForInitializer {
+    fn evaluate(&self, evaluator: &mut Evaluator) -> LoxValue {
+        match self {
+            ForInitializer::Expression(expr) => expr.evaluate(evaluator),
+            ForInitializer::VariableDeclaration { assignee, value } => {
+                let value = match value {
+                    None => LoxValue::Nil,
+                    Some(value) => value.evaluate(evaluator),
+                };
+                todo!("ForInitializer::VariableDeclaration({assignee:?}, {value})")
+            }
         }
     }
 }
