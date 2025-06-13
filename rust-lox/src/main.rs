@@ -200,13 +200,11 @@
     feature(gen_blocks),
 )]
 
-// Sanity check for Nightly features.
+extern crate alloc; // Sanity check for Nightly features.
 #[cfg(all(feature = "nightly", not(nightly)))]
 compile_error!(
     "nightly feature cannot be used without a nightly toolchain (detected by rustversion)"
 );
-
-extern crate alloc;
 
 // Modules and Imports
 pub mod lox;
@@ -216,12 +214,12 @@ use clap::{Parser, Subcommand};
 use lox::errors::EngineError;
 use lox::token::lexer;
 
+use crate::lox::eval::Evaluator;
 use crate::lox::parser::imperative::Parse;
 use crate::lox::{ast, parser, validate};
 use std::fs;
 use std::io::{Error as IOError, Write};
 use std::process::{ExitCode, Termination};
-use crate::lox::eval::Evaluator;
 
 fn process_source(source: &str) -> Result<ast::Program, EngineError> {
     let tokens = lexer::tokenize(source).map_err(EngineError::LexingErrors)?;
@@ -252,7 +250,8 @@ fn run_file(file: String, _std_conformant: bool) -> Result<(), EngineError> {
     let source = fs::read_to_string(file)?;
 
     let program = process_source(&source)?;
-    println!("Program: {program:?}");
+    let result = Evaluator::default().evaluate(program).unwrap();
+    println!("result: {result}");
     Ok(())
 }
 
@@ -273,8 +272,7 @@ fn run_prompt(_std_conformant: bool) -> Result<(), IOError> {
         let _: usize = stdin.read_line(&mut line)?;
 
         let program = process_source(&line).expect("Error processing source");
-        
-        let result = evaluator.evaluate(program);
+        let result = evaluator.evaluate(program).unwrap();
         println!("{result}");
     }
 }

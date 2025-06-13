@@ -3,6 +3,7 @@
 
 use core::cmp::{Ordering, max, min};
 use core::fmt::{Display, Formatter};
+use std::hash::Hash;
 
 /// A Location simply consists of a line and column position.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -111,6 +112,12 @@ impl Display for Span {
 #[expect(clippy::exhaustive_structs, reason = "this is set in stone")]
 pub struct Located<T>(pub T, pub Span);
 
+impl<T: Hash> Hash for Located<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
 /// This instance is for making comparisons between located
 /// values and the underlying types easier.
 ///
@@ -171,6 +178,6 @@ impl RawLiteral {
 }
 
 /// Identifiers inside the Lox Language.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[expect(clippy::exhaustive_structs, reason = "Identifiers stay as Strings.")]
 pub struct Identifier(pub String);

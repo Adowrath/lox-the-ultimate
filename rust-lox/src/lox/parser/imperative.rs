@@ -246,6 +246,15 @@ impl Parse<tokens::Token> for ast::Declaration {
                         }
                     },
                 )?,
+                superclass: {
+                    match state.peek()?.0 {
+                        tokens::TokenType::LessThan => {
+                            state.advance()?;
+                            Some(ast::Reference::Identifier(types::Located::parse(state)?))
+                        }
+                        _ => None,
+                    }
+                },
                 funcs: {
                     state.consume(tokens::TokenType::LeftBrace, "{")?;
                     let mut funcs = Vec::new();
@@ -552,6 +561,14 @@ impl Parse<tokens::Token> for ast::Expr {
                 tokens::TokenType::Keyword(tokens::Keyword::False) => {
                     ast::Expr::Literal(start_span.locate(ast::Literal::Boolean(false)))
                 }
+                tokens::TokenType::Keyword(tokens::Keyword::This) => {
+                    ast::Expr::Reference(ast::Reference::Identifier(
+                        start_span.locate(types::Identifier("this".to_string())),
+                    ))
+                }
+                tokens::TokenType::Keyword(tokens::Keyword::Super) => {
+                    todo!("Super call...")
+                }
                 _ => {
                     return Err(ParseError::UnexpectedToken {
                         expected: "parenthesized expression, -, !, literal, identifier, nil, true, or false",
@@ -603,6 +620,8 @@ impl Parse<tokens::Token> for ast::Expr {
 
                             arguments.push(ast::Expr::parse(state)?);
                         }
+
+                        // TODO Max Argument count length
 
                         // Temporary Expression, taking a random location as it is not relevant.
                         let mut temp_lhs = ast::Expr::Literal(last_span.locate(ast::Literal::Nil));

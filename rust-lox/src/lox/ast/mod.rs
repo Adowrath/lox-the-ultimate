@@ -18,12 +18,12 @@ macro_rules! l(($t:ty) => {
     crate::lox::types::Located<$t>
 });
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Program {
     pub declarations: Vec<Declaration>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Declaration {
     VariableDeclaration {
         assignee: Reference,
@@ -31,13 +31,14 @@ pub enum Declaration {
     },
     ClassDeclaration {
         name: Reference,
+        superclass: Option<Reference>,
         funcs: Vec<FunctionDeclaration>,
     },
     FunctionDeclaration(FunctionDeclaration),
     Statement(Statement),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FunctionDeclaration {
     pub span: Span,
     pub name: Reference,
@@ -45,7 +46,7 @@ pub struct FunctionDeclaration {
     pub body: Vec<Declaration>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     ExpressionStatement(Expr),
     IfStatement {
@@ -80,7 +81,7 @@ pub enum Statement {
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ForInitializer {
     VariableDeclaration {
         assignee: Reference,
@@ -90,12 +91,7 @@ pub enum ForInitializer {
 }
 
 /// Expressions in the Lox language.
-/// Their Span will be computed via [`Span::merge`] from all its
-/// sub-spans, except for the following, which pre-compute it:
-///
-/// - Parenthesized expressions (both parentheses)
-/// - Function calls (trailing parenthesis)
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -139,11 +135,12 @@ pub enum Expr {
         receiver: Box<Expr>,
         field_name: l!(Identifier),
     },
+    // TODO Super
 }
 
 // Atomic pieces.
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -158,9 +155,19 @@ pub enum Reference {
     Global(l!(Identifier)),
 }
 
+impl Reference {
+    pub fn id(&self) -> &l!(Identifier) {
+        match self {
+            Reference::Identifier(identifier) => identifier,
+            Reference::Resolved { name, .. } => name,
+            Reference::Global(identifier) => identifier,
+        }
+    }
+}
+
 /// Literals, either a raw literal, or one covered by
 /// keywords (true/false, nil).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -175,7 +182,7 @@ pub enum Literal {
 }
 
 /// Prefix operators.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -188,7 +195,7 @@ pub enum PrefixOp {
 }
 
 /// Infix operators.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[expect(
     clippy::exhaustive_enums,
     reason = "adding a new variant MUST be handled and is a breaking change."
@@ -256,6 +263,25 @@ impl InfixOp {
 pub enum Precedence {
     Left(usize),
     Right(usize),
+}
+
+/// AST Nodes that have a source span.
+pub trait CollectSpan {
+    fn span(&self) -> Span;
+}
+
+impl CollectSpan for Expr {
+    fn span(&self) -> Span {
+        match self {
+            Expr::PrefixExpression { .. } => Span::Empty,
+            Expr::InfixOperation { .. } => Span::Empty,
+            Expr::Parenthesized { .. } => Span::Empty,
+            Expr::Reference(_) => Span::Empty,
+            Expr::Literal(_) => Span::Empty,
+            Expr::CallExpression { .. } => Span::Empty,
+            Expr::PathExpression { .. } => Span::Empty,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,13 +1,90 @@
-class Test {
-    /*
-     * Constructor function
-     * /* supports nested block comments */
-     */
-    init(a, b) {
-        super(a);
-        this.b = b;
+class Parent {
+    foo() {
+        print "parent.foo()";
+    }
+    bar() {
+        print "parent.bar()";
     }
 }
 
-var t = Test();
+class Child < Parent {
+    /* Constructor function
+     * /* supports nested block comments */
+     */
+    init(a, b) {
+        print a;
+        this.b = b;
+    }
+
+    bar() {
+        print "child.bar()";
+    }
+}
+
+var t = Child(1, 2);
 print t;
+print t.b;
+
+t.foo();
+t.bar();
+
+class Node {
+    init(elem) {
+        this.elem = elem;
+        this.prev = nil;
+        this.next = nil;
+    }
+}
+
+class LinkedList {
+
+    init() {
+        this.first = nil;
+        this.last = nil;
+    }
+    push(elem) {
+        var newLast = Node(elem);
+        if(this.last != nil) {
+            this.last.next = newLast;
+            newLast.prev = this.last;
+
+            this.last = newLast;
+        } else {
+            this.first = this.last = newLast;
+        }
+    }
+
+    pop() {
+        if(this.last != nil) {
+            if(this.last.prev == nil) {
+                this.first = nil;
+            }
+            var oldLast = this.last;
+            this.last = oldLast.prev;
+
+            oldLast.prev = nil;
+            if(this.last != nil) {
+                this.last.next = nil;
+            }
+        }
+    }
+
+    printOut() {
+        print "List: ";
+        var next = this.first;
+        while(next != null) {
+            print next.elem;
+            next = next.next;
+        }
+    }
+}
+
+
+var l = LinkedList();
+l.push(10);
+l.push(20);
+l.pop();
+l.push(30);
+l.printOut();
+
+// */

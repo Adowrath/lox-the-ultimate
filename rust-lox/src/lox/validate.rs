@@ -10,6 +10,8 @@ pub enum ValidateError {
     Invalid(&'static str, Span),
     UnknownReference(Located<Identifier>),
     EarlyReference(Located<Identifier>),
+    Duplicate(Located<Identifier>),
+    CyclicSuperclass(Located<Identifier>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -85,6 +87,16 @@ impl ValidationState {
                 return;
             }
 
+            if self
+                .scopes
+                .last()
+                .unwrap()
+                .iter()
+                .any(|(existing, _)| id == existing)
+            {
+                self.report(ValidateError::Duplicate(id.clone()));
+            }
+
             self.scopes.last_mut().unwrap().push((id.0.clone(), false));
             func(self);
 
@@ -121,10 +133,10 @@ impl ValidationState {
                 }
             }
         }
-        // We only error out if we are at the top-level
-        if self.scopes.is_empty() {
-            self.report(ValidateError::UnknownReference(id.clone()));
-        }
+        // // We make it an error if we are not at the top-level and could not resolve the value.
+        // if !self.scopes.is_empty() {
+        //     self.report(ValidateError::UnknownReference(id.clone()));
+        // }
         Reference::Global(id)
     }
 }
@@ -178,8 +190,16 @@ impl Validate for Declaration {
                     }
                 });
             }
-            Declaration::ClassDeclaration { name, funcs } => {
+            Declaration::ClassDeclaration { name, superclass, funcs } => {
                 state.declare(name);
+                superclass.validate(state);
+
+                if let Some(superclass) = superclass {
+                    if name.id().0 == superclass.id().0 {
+                        state.report(ValidateError::CyclicSuperclass(name.id().clone()));
+                    }
+                }
+
 
                 let subclass = false;
                 let define_methods = |state: &mut ValidationState| {
@@ -189,12 +209,9 @@ impl Validate for Declaration {
                             Span::Empty,
                         )));
 
+                        // TODO Verify no duplicate method names.
                         for func_decl in funcs {
-                            let func_name = match func_decl.name {
-                                Reference::Identifier(ref id) => id,
-                                Reference::Resolved { ref name, .. } => name,
-                                Reference::Global(ref name) => name,
-                            };
+                            let func_name = func_decl.name.id();
                             let ctx = if func_name.0 == Identifier("init".to_owned()) {
                                 Context::Initializer { subclass }
                             } else {
